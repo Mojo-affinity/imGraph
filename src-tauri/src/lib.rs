@@ -2,11 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MediaFile {
     pub path: String,
     pub name: String,
+    pub rel_path: String,
     pub ext: String,
     pub media_type: String,
 }
@@ -33,19 +35,20 @@ fn metadata_path(dir_path: &str) -> std::path::PathBuf {
 
 #[tauri::command]
 fn scan_directory(path: String) -> Result<Vec<MediaFile>, String> {
-    let dir = Path::new(&path);
-    if !dir.is_dir() {
+    let root = Path::new(&path);
+    if !root.is_dir() {
         return Err(format!("ディレクトリではありません: {}", path));
     }
 
     let mut files = Vec::new();
-    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
 
-    for entry in entries.flatten() {
+    for entry in WalkDir::new(root)
+        .follow_links(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
         let file_path = entry.path();
-        if !file_path.is_file() {
-            continue;
-        }
 
         let ext = file_path
             .extension()
@@ -67,15 +70,22 @@ fn scan_directory(path: String) -> Result<Vec<MediaFile>, String> {
             .unwrap_or("")
             .to_string();
 
+        let rel_path = file_path
+            .strip_prefix(root)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+
         files.push(MediaFile {
             path: file_path.to_string_lossy().to_string(),
             name,
+            rel_path,
             ext,
             media_type: media_type.to_string(),
         });
     }
 
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    files.sort_by(|a, b| a.rel_path.to_lowercase().cmp(&b.rel_path.to_lowercase()));
     Ok(files)
 }
 

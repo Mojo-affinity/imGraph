@@ -1,6 +1,7 @@
 export interface MediaFile {
   path: string;
   name: string;
+  rel_path: string;
   ext: string;
   media_type: 'image' | 'video';
 }

@@ -51,6 +51,11 @@ export function FileList({ files, selectedIndex, metadata, onSelect }: FileListP
             </div>
             <div className="file-item__info">
               <span className="file-item__name">{file.name}</span>
+              {file.rel_path !== file.name && (
+                <span className="file-item__dir">
+                  {file.rel_path.substring(0, file.rel_path.lastIndexOf(file.name) - 1)}
+                </span>
+              )}
               {meta && meta.rating > 0 && (
                 <span className="file-item__rating">{'★'.repeat(meta.rating)}</span>
               )}
