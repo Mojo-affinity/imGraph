@@ -1,6 +1,6 @@
 [package]
 name = "im-graph"
-version = "0.1.0"
+version = "0.2.1"
 description = "A multi-platform media viewer with tagging and rating"
 authors = []
 edition = "2021"

@@ -48,14 +48,28 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
     };
   }, [naturalWidth, naturalHeight]);
 
+  const onDoubleClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    const target = e.target as SVGElement;
+    const el = target.closest<SVGElement>('[data-action]') ?? target;
+    const action = el.dataset.action;
+    const boxId = el.dataset.boxId;
+    if (action === 'move' && boxId) {
+      const box = boundingBoxes.find(b => b.id === boxId);
+      if (box) setEditState({ id: boxId, label: box.label });
+    }
+  }, [boundingBoxes]);
+
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const { x, y } = toNorm(e.clientX, e.clientY);
-    const el = e.target as SVGElement;
+    const target = e.target as SVGElement;
+    // data-action を持つ最近傍の祖先要素を探す（<circle> など子要素対応）
+    const el = target.closest<SVGElement>('[data-action]') ?? target;
     const action = el.dataset.action;
     const boxId = el.dataset.boxId;
 
-    if (action === 'delete') return; // onClick で処理
+    if (action === 'delete') return; // onClick で処理（capture しない）
+
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const { x, y } = toNorm(e.clientX, e.clientY);
 
     if (action === 'move' && boxId) {
       const box = boundingBoxes.find(b => b.id === boxId);
@@ -171,6 +185,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onDoubleClick={onDoubleClick}
     >
       {boundingBoxes.map(box => {
         const px = box.x * W,     py = box.y * H;
@@ -246,10 +261,6 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
                 fontSize={fs * 0.85}
                 fill="rgba(255,255,255,0.45)"
                 style={{ pointerEvents: 'none', userSelect: 'none' }}
-                onDoubleClick={e => {
-                  e.stopPropagation();
-                  setEditState({ id: box.id, label: box.label });
-                }}
               >
                 ダブルクリックでラベル編集
               </text>

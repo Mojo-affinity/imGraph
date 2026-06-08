@@ -313,6 +313,7 @@
   justify-content: center;
   background: var(--bg);
   overflow: hidden;
+  position: relative;
 }
 
 .media-viewer--empty {
