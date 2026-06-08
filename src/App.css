@@ -366,6 +366,122 @@
 }
 .toolbar__inference-btn:disabled { opacity: 0.4; cursor: default; }
 
+/* ── Face Model Settings ──────────────────────────── */
+.toolbar__face-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.toolbar__gear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.toolbar__gear-btn:hover,
+.toolbar__gear-btn--active {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.face-model-settings {
+  position: relative;
+}
+
+.face-model-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  width: 340px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.face-model-panel__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+
+.face-model-panel__label {
+  font-size: 11px;
+  color: var(--text-2);
+  display: block;
+}
+
+.face-model-panel__hint {
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+.face-model-panel__row {
+  display: flex;
+  gap: 6px;
+}
+
+.face-model-panel__input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  outline: none;
+  min-width: 0;
+}
+.face-model-panel__input:focus { border-color: var(--accent); }
+
+.face-model-panel__browse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.face-model-panel__browse:hover { color: var(--text); background: var(--surface-hover); }
+
+.face-model-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.face-model-panel__save {
+  padding: 5px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.face-model-panel__save:hover { opacity: 0.9; }
+
 /* ── Detection List ───────────────────────────────── */
 .detection-loading {
   display: flex;

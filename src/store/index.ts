@@ -8,6 +8,7 @@ import type {
   MetadataMap,
   BoundingBox,
   InferenceMode,
+  ModelConfig,
 } from '../types';
 
 // ─── イベントリスナー管理 (ストア外で保持) ───────────────────
@@ -57,6 +58,10 @@ interface StoreState {
   isTraining: boolean;
   trainingLogs: string[];
 
+  // ── モデル設定 ────────────────────────────────────────────
+  faceScriptPath: string;
+  faceModelDir: string;
+
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: () => Promise<void>;
   selectFile: (index: number) => void;
@@ -83,6 +88,10 @@ interface StoreState {
   setIsTraining: (v: boolean) => void;
   appendTrainingLog: (log: string) => void;
   clearTrainingLogs: () => void;
+
+  // ── モデル設定 ────────────────────────────────────────────
+  loadModelConfig: () => Promise<void>;
+  saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
 }
 
 // ─── ストア ───────────────────────────────────────────────────
@@ -103,6 +112,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   isSaving: false,
   isTraining: false,
   trainingLogs: [],
+  faceScriptPath: '',
+  faceModelDir: '',
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -246,8 +257,17 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
     set({ isInferring: true, boundingBoxes: [], inferenceMode: mode, error: null });
     try {
-      const command = mode === 'face' ? 'detect_faces_and_age' : 'detect_objects';
-      const boxes = await invoke<BoundingBox[]>(command, { imagePath });
+      let boxes: BoundingBox[];
+      if (mode === 'face') {
+        const { faceScriptPath, faceModelDir } = get();
+        boxes = await invoke<BoundingBox[]>('detect_faces_and_age', {
+          imagePath,
+          scriptPath: faceScriptPath,
+          modelDir: faceModelDir,
+        });
+      } else {
+        boxes = await invoke<BoundingBox[]>('detect_objects', { imagePath });
+      }
       set({ boundingBoxes: boxes, isInferring: false });
     } catch (e) {
       set({ error: String(e), isInferring: false });
@@ -285,4 +305,25 @@ export const useStore = create<StoreState>()((set, get) => ({
   appendTrainingLog: (log) =>
     set((s) => ({ trainingLogs: [...s.trainingLogs, log] })),
   clearTrainingLogs: () => set({ trainingLogs: [] }),
+
+  // ── モデル設定 ────────────────────────────────────────────
+  loadModelConfig: async () => {
+    try {
+      const config = await invoke<ModelConfig>('load_model_config');
+      set({ faceScriptPath: config.face_script_path, faceModelDir: config.face_model_dir });
+    } catch {
+      // ファイル未作成時は初期値のまま
+    }
+  },
+
+  saveModelConfig: async (scriptPath, modelDir) => {
+    try {
+      await invoke('save_model_config', {
+        config: { face_script_path: scriptPath, face_model_dir: modelDir },
+      });
+      set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
 }));

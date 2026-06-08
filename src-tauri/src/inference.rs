@@ -26,16 +26,12 @@ pub struct BoundingBox {
 
 // ─── 物体検出 ─────────────────────────────────────────────────
 //
-// TODO: candle-core / ort (ONNX Runtime) による実推論に置き換える。
+// TODO: ort (ONNX Runtime) による実推論に置き換える。
 //   推奨モデル: YOLOv8n (ONNX) — https://github.com/ultralytics/ultralytics
-//   Cargo.toml に以下を追加:
-//     ort = { version = "2", features = ["load-dynamic"] }
-//     image = { version = "0.25", default-features = false, features = ["jpeg","png","webp"] }
 //
 pub async fn run_object_detection(image_path: &str) -> Result<Vec<BoundingBox>, String> {
     validate_image_path(image_path)?;
 
-    // ── ダミー結果 ───────────────────────────────────────────
     Ok(vec![
         BoundingBox {
             id: next_id(),
@@ -54,31 +50,62 @@ pub async fn run_object_detection(image_path: &str) -> Result<Vec<BoundingBox>, 
     ])
 }
 
-// ─── 顔検出 + 年齢推定 ────────────────────────────────────────
+// ─── 顔検出 + 年齢推定（Python subprocess） ──────────────────
 //
-// TODO: 顔検出 (RetinaFace / MediaPipe Face Detection ONNX) +
-//       年齢推定モデル (SSR-Net 等) に置き換える。
+// scripts/detect_faces.py を python3 で呼び出し、
+// stdout の JSON を Vec<BoundingBox> にパースして返す。
 //
-pub async fn run_face_detection(image_path: &str) -> Result<Vec<BoundingBox>, String> {
+pub async fn run_face_detection(
+    image_path: &str,
+    script_path: &str,
+    model_dir: &str,
+) -> Result<Vec<BoundingBox>, String> {
     validate_image_path(image_path)?;
 
-    // ── ダミー結果 ───────────────────────────────────────────
-    Ok(vec![
-        BoundingBox {
-            id: next_id(),
-            x: 0.28, y: 0.08, width: 0.22, height: 0.30,
-            label: "face".to_string(),
-            confidence: 0.97,
-            age: Some(28),
-        },
-        BoundingBox {
-            id: next_id(),
-            x: 0.60, y: 0.12, width: 0.18, height: 0.26,
-            label: "face".to_string(),
-            confidence: 0.85,
-            age: Some(42),
-        },
-    ])
+    if script_path.is_empty() {
+        return Err(
+            "顔検出スクリプトが設定されていません。\
+             Toolbar の ⚙ から detect_faces.py のパスを設定してください。"
+                .to_string(),
+        );
+    }
+    if !Path::new(script_path).exists() {
+        return Err(format!("スクリプトが見つかりません: {}", script_path));
+    }
+
+    let image_path = image_path.to_string();
+    let script_path = script_path.to_string();
+    let model_dir = model_dir.to_string();
+
+    // ブロッキング処理を spawn_blocking で非同期化
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let python = if cfg!(target_os = "windows") { "python" } else { "python3" };
+        let mut cmd = std::process::Command::new(python);
+        cmd.arg(&script_path).arg("--image").arg(&image_path);
+        if !model_dir.is_empty() {
+            cmd.arg("--model-dir").arg(&model_dir);
+        }
+        cmd.output()
+    })
+    .await
+    .map_err(|e| format!("タスク実行エラー: {}", e))?
+    .map_err(|e| format!("Python 起動エラー: {}", e))?;
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!("スクリプトエラー:\n{}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let mut boxes: Vec<BoundingBox> =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON パースエラー: {}", e))?;
+
+    // スクリプト側の仮 ID をアトミックカウンタ由来の一意 ID に差し替え
+    for b in &mut boxes {
+        b.id = next_id();
+    }
+
+    Ok(boxes)
 }
 
 // ─── 共通バリデーション ───────────────────────────────────────

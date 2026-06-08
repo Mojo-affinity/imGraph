@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "im-graph"
-version = "0.1.0"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",

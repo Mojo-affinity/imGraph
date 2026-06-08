@@ -9,6 +9,44 @@ use std::path::{Path, PathBuf};
 use tauri::Emitter;
 use walkdir::WalkDir;
 
+// ─── モデル設定 ───────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct ModelConfig {
+    #[serde(default)]
+    face_script_path: String,
+    #[serde(default)]
+    face_model_dir: String,
+}
+
+fn model_config_path() -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".imgraph").join("model_config.json")
+}
+
+#[tauri::command]
+fn save_model_config(config: ModelConfig) -> Result<(), String> {
+    let path = model_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_model_config() -> Result<ModelConfig, String> {
+    let path = model_config_path();
+    if !path.exists() {
+        return Ok(ModelConfig::default());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MediaFile {
     pub path: String,
@@ -179,8 +217,12 @@ async fn detect_objects(image_path: String) -> Result<Vec<inference::BoundingBox
 }
 
 #[tauri::command]
-async fn detect_faces_and_age(image_path: String) -> Result<Vec<inference::BoundingBox>, String> {
-    inference::run_face_detection(&image_path).await
+async fn detect_faces_and_age(
+    image_path: String,
+    script_path: String,
+    model_dir: String,
+) -> Result<Vec<inference::BoundingBox>, String> {
+    inference::run_face_detection(&image_path, &script_path, &model_dir).await
 }
 
 // ─── アプリ起動 ───────────────────────────────────────────────
@@ -202,6 +244,8 @@ pub fn run() {
             get_is_training,
             detect_objects,
             detect_faces_and_age,
+            save_model_config,
+            load_model_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

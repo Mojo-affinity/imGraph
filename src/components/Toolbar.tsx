@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { useStore } from '../store';
 import type { MediaFile } from '../types';
 
 interface ToolbarProps {
@@ -81,15 +83,21 @@ export function Toolbar({
             <BoxIcon />
             物体検出
           </button>
-          <button
-            className="toolbar__inference-btn"
-            onClick={onDetectFaces}
-            disabled={!canInfer}
-            title="顔・年齢を検出"
-          >
-            <FaceIcon />
-            顔検出
-          </button>
+
+          {/* 顔検出 + 設定ギア */}
+          <div className="toolbar__face-group">
+            <button
+              className="toolbar__inference-btn"
+              onClick={onDetectFaces}
+              disabled={!canInfer}
+              title="顔・年齢を検出"
+            >
+              <FaceIcon />
+              顔検出
+            </button>
+            <FaceModelSettings />
+          </div>
+
           {isInferring && <span className="toolbar__spinner" />}
         </div>
       )}
@@ -115,6 +123,107 @@ export function Toolbar({
   );
 }
 
+// ─── 顔検出モデル設定パネル ────────────────────────────────────
+
+function FaceModelSettings() {
+  const { faceScriptPath, faceModelDir, saveModelConfig } = useStore();
+  const [isOpen, setOpen] = useState(false);
+  const [scriptPath, setScriptPath] = useState(faceScriptPath);
+  const [modelDir, setModelDir] = useState(faceModelDir);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // ストアが更新されたら入力欄も同期
+  useEffect(() => { setScriptPath(faceScriptPath); }, [faceScriptPath]);
+  useEffect(() => { setModelDir(faceModelDir); }, [faceModelDir]);
+
+  // パネル外クリックで閉じる
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  const browseScript = async () => {
+    const path = await openDialog({ multiple: false, directory: false });
+    if (typeof path === 'string') setScriptPath(path);
+  };
+
+  const browseModelDir = async () => {
+    const path = await openDialog({ multiple: false, directory: true });
+    if (typeof path === 'string') setModelDir(path);
+  };
+
+  const handleSave = async () => {
+    await saveModelConfig(scriptPath, modelDir);
+    setOpen(false);
+  };
+
+  return (
+    <div className="face-model-settings" ref={panelRef}>
+      <button
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        title="顔検出モデル設定"
+      >
+        <GearIcon />
+      </button>
+
+      {isOpen && (
+        <div className="face-model-panel">
+          <p className="face-model-panel__title">顔検出設定</p>
+
+          <label className="face-model-panel__label">
+            Python スクリプト
+            <span className="face-model-panel__hint">（detect_faces.py）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={scriptPath}
+              onChange={e => setScriptPath(e.target.value)}
+              placeholder="scripts/detect_faces.py のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseScript}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <label className="face-model-panel__label">
+            モデルディレクトリ
+            <span className="face-model-panel__hint">（空 = ~/.insightface）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={modelDir}
+              onChange={e => setModelDir(e.target.value)}
+              placeholder="省略可（デフォルト: ~/.insightface）"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseModelDir}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <div className="face-model-panel__actions">
+            <button className="face-model-panel__save" onClick={handleSave}>
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── アイコン ─────────────────────────────────────────────────
+
 function FolderIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -139,6 +248,15 @@ function FaceIcon() {
       <path strokeLinecap="round" d="M8 14s1.5 2 4 2 4-2 4-2" />
       <circle cx="9" cy="10" r="1" fill="currentColor" />
       <circle cx="15" cy="10" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

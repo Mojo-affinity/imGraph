@@ -28,3 +28,8 @@ export interface BoundingBox {
 }
 
 export type InferenceMode = 'none' | 'object' | 'face';
+
+export interface ModelConfig {
+  face_script_path: string;
+  face_model_dir: string;
+}
