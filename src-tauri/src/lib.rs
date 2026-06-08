@@ -1,5 +1,6 @@
 mod annotation;
 mod inference;
+mod training;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -153,6 +154,23 @@ async fn load_classes(dir_path: String) -> Result<Vec<String>, String> {
     annotation::load_classes(&dir_path)
 }
 
+// ─── 学習コマンド ─────────────────────────────────────────────
+
+#[tauri::command]
+async fn start_training(
+    app: tauri::AppHandle,
+    script_path: String,
+    dataset_path: String,
+    extra_args: Vec<String>,
+) -> Result<(), String> {
+    training::start(app, script_path, dataset_path, extra_args)
+}
+
+#[tauri::command]
+fn get_is_training() -> bool {
+    training::is_training()
+}
+
 // ─── 推論コマンド ─────────────────────────────────────────────
 
 #[tauri::command]
@@ -180,6 +198,8 @@ pub fn run() {
             save_annotation,
             load_annotation,
             load_classes,
+            start_training,
+            get_is_training,
             detect_objects,
             detect_faces_and_age,
         ])

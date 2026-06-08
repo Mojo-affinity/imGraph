@@ -77,6 +77,7 @@ interface StoreState {
   setIsInferring: (v: boolean) => void;
 
   // ── 学習操作 ──────────────────────────────────────────────
+  startTraining: (scriptPath: string, datasetPath: string, extraArgs?: string[]) => Promise<void>;
   setIsTraining: (v: boolean) => void;
   appendTrainingLog: (log: string) => void;
   clearTrainingLogs: () => void;
@@ -253,6 +254,29 @@ export const useStore = create<StoreState>()((set, get) => ({
   setIsInferring: (v) => set({ isInferring: v }),
 
   // ── 学習操作 ──────────────────────────────────────────────
+  startTraining: async (scriptPath, datasetPath, extraArgs = []) => {
+    set({ isTraining: true, trainingLogs: [], error: null });
+
+    // イベントリスナーを invoke より先に登録
+    const unlistenLog = await listen<string>('training-log', (event) => {
+      set((s) => ({ trainingLogs: [...s.trainingLogs, event.payload] }));
+    });
+
+    const unlistenComplete = await listen<boolean>('training-complete', () => {
+      set({ isTraining: false });
+      unlistenLog();
+      unlistenComplete();
+    });
+
+    try {
+      await invoke('start_training', { scriptPath, datasetPath, extraArgs });
+    } catch (e) {
+      set({ isTraining: false, error: String(e) });
+      unlistenLog();
+      unlistenComplete();
+    }
+  },
+
   setIsTraining: (v) => set({ isTraining: v }),
   appendTrainingLog: (log) =>
     set((s) => ({ trainingLogs: [...s.trainingLogs, log] })),
