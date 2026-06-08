@@ -122,6 +122,64 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* ── File Groups ──────────────────────────────────── */
+.file-group__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.1s;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.file-group__header:hover { background: var(--surface-hover); }
+.file-group__header--open { border-bottom-color: transparent; }
+
+.file-group__arrow {
+  font-size: 8px;
+  flex-shrink: 0;
+  color: var(--text-2);
+  width: 10px;
+}
+
+.file-group__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-group__parent {
+  color: var(--text-2);
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.file-group__count {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.file-item--indented {
+  padding-left: 18px;
+}
+
 /* ── File List ────────────────────────────────────── */
 .file-list {
   width: var(--sidebar-w);
