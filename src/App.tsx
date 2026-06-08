@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useMediaStore } from './hooks/useMediaStore';
+import { usePrefetch } from './hooks/usePrefetch';
 import { Toolbar } from './components/Toolbar';
 import { FileList } from './components/FileList';
 import { MediaViewer } from './components/MediaViewer';
@@ -8,6 +9,7 @@ import './App.css';
 
 function App() {
   const store = useMediaStore();
+  usePrefetch(store.files, store.selectedIndex);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
