@@ -1,4 +1,6 @@
+import { useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { BoundingBoxEditor } from './BoundingBoxEditor';
 import type { MediaFile } from '../types';
 
 interface MediaViewerProps {
@@ -6,6 +8,9 @@ interface MediaViewerProps {
 }
 
 export function MediaViewer({ file }: MediaViewerProps) {
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+
   if (!file) {
     return (
       <div className="media-viewer media-viewer--empty">
@@ -22,11 +27,28 @@ export function MediaViewer({ file }: MediaViewerProps) {
       <div className="media-viewer">
         <img
           key={src}
+          ref={imgRef}
           src={src}
           alt={file.name}
           className="media-viewer__image"
           draggable={false}
+          onLoad={() => {
+            if (imgRef.current) {
+              setNaturalSize({
+                width:  imgRef.current.naturalWidth,
+                height: imgRef.current.naturalHeight,
+              });
+            }
+          }}
         />
+        {/* SVG の viewBox を自然サイズに合わせることで
+            object-fit:contain の letterbox にも自動整合する */}
+        {naturalSize.width > 0 && (
+          <BoundingBoxEditor
+            naturalWidth={naturalSize.width}
+            naturalHeight={naturalSize.height}
+          />
+        )}
       </div>
     );
   }
