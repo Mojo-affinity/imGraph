@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback } from 'react'; // useState: editState, preview
 import { useStore } from '../store';
 import type { BoundingBox } from '../types';
 
@@ -22,12 +22,14 @@ interface Props {
 }
 
 export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
-  const { boundingBoxes, addBoundingBox, updateBoundingBox, removeBoundingBox } = useStore();
+  const {
+    boundingBoxes, addBoundingBox, updateBoundingBox, removeBoundingBox,
+    selectedBoxId, setSelectedBoxId,
+  } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
 
   // dragRef でドラッグ状態を保持（再レンダーを最小化）
   const dragRef = useRef<Drag>({ type: 'none' });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editState, setEditState] = useState<{ id: string; label: string } | null>(null);
   // 作成中のプレビュー矩形のみ state で管理（表示更新が必要なため）
   const [preview, setPreview] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -58,14 +60,14 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
     if (action === 'move' && boxId) {
       const box = boundingBoxes.find(b => b.id === boxId);
       if (!box) return;
-      setSelectedId(boxId);
+      setSelectedBoxId(boxId);
       setEditState(null);
       dragRef.current = { type: 'moving', id: boxId, ox: box.x, oy: box.y, mx: x, my: y };
 
     } else if (action === 'resize' && boxId) {
       const box = boundingBoxes.find(b => b.id === boxId);
       if (!box) return;
-      setSelectedId(boxId);
+      setSelectedBoxId(boxId);
       dragRef.current = {
         type: 'resizing',
         id: boxId,
@@ -76,7 +78,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
 
     } else {
       // 背景クリック → 作成開始
-      setSelectedId(null);
+      setSelectedBoxId(null);
       setEditState(null);
       dragRef.current = { type: 'creating', x0: x, y0: y };
     }
@@ -148,7 +150,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
         confidence: 1.0,
       };
       addBoundingBox(box);
-      setSelectedId(box.id);
+      setSelectedBoxId(box.id);
     }
     dragRef.current = { type: 'none' };
     setPreview(null);
@@ -173,7 +175,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
       {boundingBoxes.map(box => {
         const px = box.x * W,     py = box.y * H;
         const pw = box.width * W, ph = box.height * H;
-        const sel = box.id === selectedId;
+        const sel = box.id === selectedBoxId;
         const stroke = sel ? '#f0b429' : '#4f8ef0';
         const labelText = box.age != null
           ? `${box.label} (${box.age}歳)`
@@ -237,7 +239,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
             </g>
 
             {/* 選択時: ラベル編集ヒント / インライン入力 */}
-            {sel && !editState && (
+            {sel && !editState?.id && (
               <text
                 x={px + pw / 2} y={py + ph / 2}
                 textAnchor="middle" dominantBaseline="central"

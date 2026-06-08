@@ -3,6 +3,68 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import type { MediaMetadata } from '../types';
 
+// ─── 検出結果リスト ────────────────────────────────────────────
+
+function DetectionList() {
+  const {
+    boundingBoxes, selectedBoxId, setSelectedBoxId,
+    removeBoundingBox, isInferring, inferenceMode,
+  } = useStore();
+
+  if (isInferring) {
+    return (
+      <section className="metadata-section">
+        <h4 className="metadata-section__title">検出結果</h4>
+        <div className="detection-loading">
+          <span className="toolbar__spinner" />
+          推論中…
+        </div>
+      </section>
+    );
+  }
+
+  if (inferenceMode === 'none' && boundingBoxes.length === 0) return null;
+
+  const modeLabel = inferenceMode === 'face' ? '顔検出' : inferenceMode === 'object' ? '物体検出' : '';
+
+  return (
+    <section className="metadata-section">
+      <h4 className="metadata-section__title">
+        検出結果
+        {modeLabel && <span className="detection-mode">({modeLabel})</span>}
+        <span className="detection-badge">{boundingBoxes.length}</span>
+      </h4>
+
+      {boundingBoxes.length === 0 ? (
+        <p className="detection-empty">検出されませんでした</p>
+      ) : (
+        <div className="detection-list">
+          {boundingBoxes.map((box) => (
+            <div
+              key={box.id}
+              className={`detection-item${box.id === selectedBoxId ? ' detection-item--selected' : ''}`}
+              onClick={() => setSelectedBoxId(box.id === selectedBoxId ? null : box.id)}
+            >
+              <span className="detection-item__label">{box.label}</span>
+              {box.age != null && (
+                <span className="detection-item__age">{box.age}歳</span>
+              )}
+              <span className="detection-item__conf">
+                {Math.round(box.confidence * 100)}%
+              </span>
+              <button
+                className="detection-item__del"
+                title="削除"
+                onClick={(e) => { e.stopPropagation(); removeBoundingBox(box.id); }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 interface MetadataPanelProps {
   fileName: string | null;
   metadata: MediaMetadata | null;
@@ -19,6 +81,7 @@ export function MetadataPanel({ fileName, metadata, onUpdate }: MetadataPanelPro
   if (!metadata || !fileName) {
     return (
       <div className="metadata-panel">
+        <DetectionList />
         <TrainingSection />
       </div>
     );
@@ -84,6 +147,7 @@ export function MetadataPanel({ fileName, metadata, onUpdate }: MetadataPanelPro
         </div>
       </section>
 
+      <DetectionList />
       <TrainingSection />
     </div>
   );

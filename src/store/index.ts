@@ -49,6 +49,7 @@ interface StoreState {
 
   // ── ML / アノテーション ───────────────────────────────────
   boundingBoxes: BoundingBox[];
+  selectedBoxId: string | null;
   classes: string[];
   inferenceMode: InferenceMode;
   isInferring: boolean;
@@ -65,6 +66,7 @@ interface StoreState {
 
   // ── アノテーション操作 ────────────────────────────────────
   saveAnnotation: () => Promise<void>;
+  setSelectedBoxId: (id: string | null) => void;
   setBoundingBoxes: (boxes: BoundingBox[]) => void;
   addBoundingBox: (box: BoundingBox) => void;
   updateBoundingBox: (id: string, updates: Partial<BoundingBox>) => void;
@@ -94,6 +96,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   isScanning: false,
   error: null,
   boundingBoxes: [],
+  selectedBoxId: null,
   classes: [],
   inferenceMode: 'none',
   isInferring: false,
@@ -153,7 +156,7 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   selectFile: (index) => {
     const { files } = get();
-    set({ selectedIndex: index, boundingBoxes: [] });
+    set({ selectedIndex: index, boundingBoxes: [], selectedBoxId: null });
     loadAnnotationForFile(
       files[index],
       index,
@@ -166,7 +169,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const { selectedIndex, files } = get();
     if (selectedIndex === null || selectedIndex <= 0) return;
     const next = selectedIndex - 1;
-    set({ selectedIndex: next, boundingBoxes: [] });
+    set({ selectedIndex: next, boundingBoxes: [], selectedBoxId: null });
     loadAnnotationForFile(
       files[next],
       next,
@@ -179,7 +182,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const { selectedIndex, files } = get();
     if (selectedIndex === null || selectedIndex >= files.length - 1) return;
     const next = selectedIndex + 1;
-    set({ selectedIndex: next, boundingBoxes: [] });
+    set({ selectedIndex: next, boundingBoxes: [], selectedBoxId: null });
     loadAnnotationForFile(
       files[next],
       next,
@@ -223,6 +226,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
+  setSelectedBoxId: (id) => set({ selectedBoxId: id }),
   setBoundingBoxes: (boxes) => set({ boundingBoxes: boxes }),
   addBoundingBox: (box) =>
     set((s) => ({ boundingBoxes: [...s.boundingBoxes, box] })),

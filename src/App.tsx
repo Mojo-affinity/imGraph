@@ -21,6 +21,18 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [store.navigatePrev, store.navigateNext]);
 
+  const handleDetectObjects = () => {
+    if (store.selectedFile?.media_type === 'image') {
+      store.runInference(store.selectedFile.path, 'object');
+    }
+  };
+
+  const handleDetectFaces = () => {
+    if (store.selectedFile?.media_type === 'image') {
+      store.runInference(store.selectedFile.path, 'face');
+    }
+  };
+
   return (
     <div className="app">
       <Toolbar
@@ -30,8 +42,11 @@ function App() {
         selectedFile={store.selectedFile}
         boundingBoxCount={store.boundingBoxes.length}
         isSaving={store.isSaving}
+        isInferring={store.isInferring}
         onOpenDirectory={store.openDirectory}
         onSaveAnnotation={store.saveAnnotation}
+        onDetectObjects={handleDetectObjects}
+        onDetectFaces={handleDetectFaces}
       />
       {store.error && (
         <div className="error-banner">{store.error}</div>
