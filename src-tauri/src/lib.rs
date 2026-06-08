@@ -1,3 +1,5 @@
+mod inference;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -130,6 +132,20 @@ fn save_metadata(
     Ok(())
 }
 
+// ─── 推論コマンド ─────────────────────────────────────────────
+
+#[tauri::command]
+async fn detect_objects(image_path: String) -> Result<Vec<inference::BoundingBox>, String> {
+    inference::run_object_detection(&image_path).await
+}
+
+#[tauri::command]
+async fn detect_faces_and_age(image_path: String) -> Result<Vec<inference::BoundingBox>, String> {
+    inference::run_face_detection(&image_path).await
+}
+
+// ─── アプリ起動 ───────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -139,7 +155,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_directory,
             load_metadata,
-            save_metadata
+            save_metadata,
+            detect_objects,
+            detect_faces_and_age,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

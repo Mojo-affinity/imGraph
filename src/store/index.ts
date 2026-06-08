@@ -49,9 +49,12 @@ interface StoreState {
   removeBoundingBox: (id: string) => void;
   clearBoundingBoxes: () => void;
 
-  // ── 学習操作 ──────────────────────────────────────────────
+  // ── 推論 ──────────────────────────────────────────────────
+  runInference: (imagePath: string, mode: InferenceMode) => Promise<void>;
   setInferenceMode: (mode: InferenceMode) => void;
   setIsInferring: (v: boolean) => void;
+
+  // ── 学習操作 ──────────────────────────────────────────────
   setIsTraining: (v: boolean) => void;
   appendTrainingLog: (log: string) => void;
   clearTrainingLogs: () => void;
@@ -176,9 +179,26 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   clearBoundingBoxes: () => set({ boundingBoxes: [] }),
 
-  // ── 学習操作 ──────────────────────────────────────────────
+  // ── 推論 ──────────────────────────────────────────────────
+  runInference: async (imagePath, mode) => {
+    if (mode === 'none') {
+      set({ boundingBoxes: [], inferenceMode: 'none' });
+      return;
+    }
+    set({ isInferring: true, boundingBoxes: [], inferenceMode: mode, error: null });
+    try {
+      const command = mode === 'face' ? 'detect_faces_and_age' : 'detect_objects';
+      const boxes = await invoke<BoundingBox[]>(command, { imagePath });
+      set({ boundingBoxes: boxes, isInferring: false });
+    } catch (e) {
+      set({ error: String(e), isInferring: false });
+    }
+  },
+
   setInferenceMode: (mode) => set({ inferenceMode: mode }),
   setIsInferring: (v) => set({ isInferring: v }),
+
+  // ── 学習操作 ──────────────────────────────────────────────
   setIsTraining: (v) => set({ isTraining: v }),
   appendTrainingLog: (log) =>
     set((s) => ({ trainingLogs: [...s.trainingLogs, log] })),
