@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import type { MediaFile } from '../types';
@@ -71,6 +72,9 @@ export function Toolbar({
 
       <div className="toolbar__spacer" />
 
+      {/* アノテーションモード切替 */}
+      {isImage && <AnnotationModeToggle />}
+
       {/* 推論ボタングループ */}
       {isImage && (
         <div className="toolbar__inference-group">
@@ -123,6 +127,24 @@ export function Toolbar({
         </button>
       )}
     </div>
+  );
+}
+
+// ─── アノテーションモード切替 ─────────────────────────────────
+
+function AnnotationModeToggle() {
+  const { annotationMode, toggleAnnotationMode } = useStore();
+  return (
+    <button
+      className={`toolbar__annotation-btn${annotationMode ? ' toolbar__annotation-btn--active' : ''}`}
+      onClick={toggleAnnotationMode}
+      title={annotationMode
+        ? 'アノテーションモード ON — クリックで OFF（パン/ズームのみ）'
+        : 'アノテーションモード OFF — クリックで ON（BB 作成・編集）'}
+    >
+      <PencilIcon />
+      アノテーション
+    </button>
   );
 }
 
@@ -234,17 +256,23 @@ function ObjectModelSettings() {
 // ─── 顔検出モデル設定パネル ────────────────────────────────────
 
 function FaceModelSettings() {
-  const { faceScriptPath, faceModelDir, saveModelConfig } = useStore();
+  const {
+    faceScriptPath, faceModelDir, saveModelConfig,
+    faceDetModelPath, faceGenderageModelPath, saveFaceOnnxConfig,
+  } = useStore();
   const [isOpen, setOpen] = useState(false);
   const [scriptPath, setScriptPath] = useState(faceScriptPath);
   const [modelDir, setModelDir] = useState(faceModelDir);
+  const [detPath, setDetPath] = useState(faceDetModelPath);
+  const [gaPath, setGaPath] = useState(faceGenderageModelPath);
+  const [autoFinding, setAutoFinding] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // ストアが更新されたら入力欄も同期
   useEffect(() => { setScriptPath(faceScriptPath); }, [faceScriptPath]);
   useEffect(() => { setModelDir(faceModelDir); }, [faceModelDir]);
+  useEffect(() => { setDetPath(faceDetModelPath); }, [faceDetModelPath]);
+  useEffect(() => { setGaPath(faceGenderageModelPath); }, [faceGenderageModelPath]);
 
-  // パネル外クリックで閉じる
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
@@ -260,30 +288,120 @@ function FaceModelSettings() {
     const path = await openDialog({ multiple: false, directory: false });
     if (typeof path === 'string') setScriptPath(path);
   };
-
   const browseModelDir = async () => {
     const path = await openDialog({ multiple: false, directory: true });
     if (typeof path === 'string') setModelDir(path);
   };
+  const browseDet = async () => {
+    const path = await openDialog({
+      multiple: false, directory: false,
+      filters: [{ name: 'ONNX Model', extensions: ['onnx'] }],
+    });
+    if (typeof path === 'string') setDetPath(path);
+  };
+  const browseGa = async () => {
+    const path = await openDialog({
+      multiple: false, directory: false,
+      filters: [{ name: 'ONNX Model', extensions: ['onnx'] }],
+    });
+    if (typeof path === 'string') setGaPath(path);
+  };
 
-  const handleSave = async () => {
+  const handleAutoFind = async () => {
+    setAutoFinding(true);
+    try {
+      const found = await invoke<string | null>('find_insightface_genderage');
+      if (found) setGaPath(found);
+    } finally {
+      setAutoFinding(false);
+    }
+  };
+
+  const handleSaveOnnx = async () => {
+    await saveFaceOnnxConfig(detPath, gaPath);
+    setOpen(false);
+  };
+  const handleSavePython = async () => {
     await saveModelConfig(scriptPath, modelDir);
     setOpen(false);
   };
 
+  const useOnnx = detPath.trim() !== '' && gaPath.trim() !== '';
+
   return (
     <div className="face-model-settings" ref={panelRef}>
       <button
-        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}`}
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}${useOnnx ? ' toolbar__gear-btn--onnx' : ''}`}
         onClick={() => setOpen(o => !o)}
-        title="顔検出モデル設定"
+        title={useOnnx ? '顔検出設定 (Rust ONNX モード)' : '顔検出設定 (Python モード)'}
       >
         <GearIcon />
       </button>
 
       {isOpen && (
-        <div className="face-model-panel">
+        <div className="face-model-panel face-model-panel--wide">
           <p className="face-model-panel__title">顔検出設定</p>
+
+          {/* ── Rust ONNX モード ── */}
+          <p className="face-model-panel__section">
+            Rust ONNX モード
+            {useOnnx && <span className="face-model-panel__active-tag">使用中</span>}
+          </p>
+
+          <label className="face-model-panel__label">
+            顔検出モデル
+            <span className="face-model-panel__hint">（YOLOv8-face .onnx）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={detPath}
+              onChange={e => setDetPath(e.target.value)}
+              placeholder="yolov8n-face.onnx のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseDet} title="参照">
+              <FolderIcon />
+            </button>
+          </div>
+
+          <label className="face-model-panel__label">
+            年齢・性別モデル
+            <span className="face-model-panel__hint">（InsightFace genderage.onnx）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={gaPath}
+              onChange={e => setGaPath(e.target.value)}
+              placeholder="genderage.onnx のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseGa} title="参照">
+              <FolderIcon />
+            </button>
+          </div>
+          <div className="face-model-panel__actions">
+            <button
+              className="face-model-panel__auto"
+              onClick={handleAutoFind}
+              disabled={autoFinding}
+              title="~/.insightface から genderage.onnx を自動検索"
+            >
+              {autoFinding ? '検索中…' : '自動検索'}
+            </button>
+            <button className="face-model-panel__save" onClick={handleSaveOnnx}>
+              保存
+            </button>
+          </div>
+
+          <hr className="face-model-panel__hr" />
+
+          {/* ── Python fallback ── */}
+          <p className="face-model-panel__section">
+            Python フォールバック
+            {!useOnnx && <span className="face-model-panel__active-tag">使用中</span>}
+          </p>
 
           <label className="face-model-panel__label">
             Python スクリプト
@@ -318,9 +436,8 @@ function FaceModelSettings() {
               <FolderIcon />
             </button>
           </div>
-
           <div className="face-model-panel__actions">
-            <button className="face-model-panel__save" onClick={handleSave}>
+            <button className="face-model-panel__save" onClick={handleSavePython}>
               保存
             </button>
           </div>
@@ -365,6 +482,15 @@ function GearIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
     </svg>
   );
 }

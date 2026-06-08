@@ -67,10 +67,15 @@ interface StoreState {
   faceModelDir: string;
   objectModelPath: string;
   objectClassNamesPath: string;
+  faceDetModelPath: string;
+  faceGenderageModelPath: string;
 
   // ── バンドル済みスクリプト（インストール時同梱）────────────
   bundledDetectFacesPy: string;
   bundledTrainPy: string;
+
+  // ── UI モード ─────────────────────────────────────────────
+  annotationMode: boolean;
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: () => Promise<void>;
@@ -107,6 +112,10 @@ interface StoreState {
   saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
   saveObjectModelConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
   loadBundledScripts: () => Promise<void>;
+  saveFaceOnnxConfig: (detModelPath: string, genderageModelPath: string) => Promise<void>;
+
+  // ── UI モード ─────────────────────────────────────────────
+  toggleAnnotationMode: () => void;
 }
 
 // ─── ストア ───────────────────────────────────────────────────
@@ -133,8 +142,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   faceModelDir: '',
   objectModelPath: '',
   objectClassNamesPath: '',
+  faceDetModelPath: '',
+  faceGenderageModelPath: '',
   bundledDetectFacesPy: '',
   bundledTrainPy: '',
+  annotationMode: true,
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -280,11 +292,13 @@ export const useStore = create<StoreState>()((set, get) => ({
     try {
       let boxes: BoundingBox[];
       if (mode === 'face') {
-        const { faceScriptPath, faceModelDir } = get();
+        const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath } = get();
         boxes = await invoke<BoundingBox[]>('detect_faces_and_age', {
           imagePath,
           scriptPath: faceScriptPath,
           modelDir: faceModelDir,
+          faceDetModelPath,
+          faceGenderageModelPath,
         });
       } else {
         const { objectModelPath, objectClassNamesPath } = get();
@@ -341,6 +355,8 @@ export const useStore = create<StoreState>()((set, get) => ({
         faceModelDir: config.face_model_dir,
         objectModelPath: config.object_model_path,
         objectClassNamesPath: config.object_class_names_path,
+        faceDetModelPath: config.face_det_model_path,
+        faceGenderageModelPath: config.face_genderage_model_path,
       });
     } catch {
       // ファイル未作成時は初期値のまま
@@ -348,7 +364,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveModelConfig: async (scriptPath, modelDir) => {
-    const { objectModelPath, objectClassNamesPath } = get();
+    const { objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath } = get();
     try {
       await invoke('save_model_config', {
         config: {
@@ -356,6 +372,8 @@ export const useStore = create<StoreState>()((set, get) => ({
           face_model_dir: modelDir,
           object_model_path: objectModelPath,
           object_class_names_path: objectClassNamesPath,
+          face_det_model_path: faceDetModelPath,
+          face_genderage_model_path: faceGenderageModelPath,
         },
       });
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
@@ -394,8 +412,10 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
+  toggleAnnotationMode: () => set(s => ({ annotationMode: !s.annotationMode })),
+
   saveObjectModelConfig: async (modelPath, classNamesPath) => {
-    const { faceScriptPath, faceModelDir } = get();
+    const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath } = get();
     try {
       await invoke('save_model_config', {
         config: {
@@ -403,9 +423,30 @@ export const useStore = create<StoreState>()((set, get) => ({
           face_model_dir: faceModelDir,
           object_model_path: modelPath,
           object_class_names_path: classNamesPath,
+          face_det_model_path: faceDetModelPath,
+          face_genderage_model_path: faceGenderageModelPath,
         },
       });
       set({ objectModelPath: modelPath, objectClassNamesPath: classNamesPath });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  saveFaceOnnxConfig: async (detModelPath, genderageModelPath) => {
+    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath } = get();
+    try {
+      await invoke('save_model_config', {
+        config: {
+          face_script_path: faceScriptPath,
+          face_model_dir: faceModelDir,
+          object_model_path: objectModelPath,
+          object_class_names_path: objectClassNamesPath,
+          face_det_model_path: detModelPath,
+          face_genderage_model_path: genderageModelPath,
+        },
+      });
+      set({ faceDetModelPath: detModelPath, faceGenderageModelPath: genderageModelPath });
     } catch (e) {
       set({ error: String(e) });
     }

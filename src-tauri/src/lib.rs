@@ -1,5 +1,6 @@
 mod annotation;
 mod dataset;
+mod face_inference;
 mod inference;
 mod training;
 
@@ -50,6 +51,11 @@ struct ModelConfig {
     object_model_path: String,
     #[serde(default)]
     object_class_names_path: String,
+    // Rust ONNX 顔検出 (空の場合は Python fallback)
+    #[serde(default)]
+    face_det_model_path: String,
+    #[serde(default)]
+    face_genderage_model_path: String,
 }
 
 fn model_config_path() -> PathBuf {
@@ -269,8 +275,28 @@ async fn detect_faces_and_age(
     image_path: String,
     script_path: String,
     model_dir: String,
+    face_det_model_path: String,
+    face_genderage_model_path: String,
 ) -> Result<Vec<inference::BoundingBox>, String> {
-    inference::run_face_detection(&image_path, &script_path, &model_dir).await
+    if !face_det_model_path.is_empty() && !face_genderage_model_path.is_empty() {
+        // Rust ONNX パイプライン
+        tauri::async_runtime::spawn_blocking(move || {
+            face_inference::run_face_detection_onnx(
+                &image_path, &face_det_model_path, &face_genderage_model_path,
+            )
+        })
+        .await
+        .map_err(|e| format!("タスク実行エラー: {}", e))?
+    } else {
+        // Python fallback
+        inference::run_face_detection(&image_path, &script_path, &model_dir).await
+    }
+}
+
+// InsightFace キャッシュから genderage.onnx を自動検索
+#[tauri::command]
+fn find_insightface_genderage() -> Option<String> {
+    face_inference::find_insightface_genderage()
 }
 
 // ─── アプリ起動 ───────────────────────────────────────────────
@@ -292,6 +318,7 @@ pub fn run() {
             get_is_training,
             detect_objects,
             detect_faces_and_age,
+            find_insightface_genderage,
             save_model_config,
             load_model_config,
             generate_dataset,

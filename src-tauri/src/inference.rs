@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static BOX_ID: AtomicU64 = AtomicU64::new(1);
 
-fn next_id() -> String {
+pub(crate) fn next_id() -> String {
     format!("bbox-{}", BOX_ID.fetch_add(1, Ordering::Relaxed))
 }
 
@@ -225,7 +225,7 @@ fn yolo_detect(
 }
 
 // CX/CY/W/H 形式同士の IoU（中心座標 + 幅高さ）
-fn iou(cx1: f32, cy1: f32, w1: f32, h1: f32, cx2: f32, cy2: f32, w2: f32, h2: f32) -> f32 {
+pub(crate) fn iou(cx1: f32, cy1: f32, w1: f32, h1: f32, cx2: f32, cy2: f32, w2: f32, h2: f32) -> f32 {
     let (x1, y1, x2, y2) = (cx1 - w1 / 2.0, cy1 - h1 / 2.0, cx1 + w1 / 2.0, cy1 + h1 / 2.0);
     let (x3, y3, x4, y4) = (cx2 - w2 / 2.0, cy2 - h2 / 2.0, cx2 + w2 / 2.0, cy2 + h2 / 2.0);
     let inter = (x2.min(x4) - x1.max(x3)).max(0.0) * (y2.min(y4) - y1.max(y3)).max(0.0);

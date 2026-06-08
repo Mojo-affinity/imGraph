@@ -323,19 +323,54 @@
   font-size: 14px;
 }
 
+/* ズーム・パン対象の内部コンテナ */
+.media-viewer__canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
 .media-viewer__image {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  /* SVG オーバーレイの z-index 基準のため */
-  position: relative;
-  z-index: 0;
+  display: block;
+  user-select: none;
 }
 
 .media-viewer__video {
   max-width: 100%;
   max-height: 100%;
   outline: none;
+}
+
+/* ── Annotation Mode Toggle ───────────────────────── */
+.toolbar__annotation-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toolbar__annotation-btn--active {
+  background: rgba(79, 142, 240, 0.12);
+  color: #4f8ef0;
+  border-color: #4f8ef0;
+}
+
+.toolbar__annotation-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* ── Inference Buttons ────────────────────────────── */
@@ -392,6 +427,10 @@
   background: var(--surface-2);
   color: var(--text);
   border-color: var(--border);
+}
+.toolbar__gear-btn--onnx {
+  color: #4f8ef0;
+  border-color: rgba(79,142,240,0.4);
 }
 
 .face-model-settings {
@@ -464,11 +503,58 @@
 }
 .face-model-panel__browse:hover { color: var(--text); background: var(--surface-hover); }
 
+.face-model-panel--wide {
+  width: 380px;
+}
+
+.face-model-panel__section {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.face-model-panel__active-tag {
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(79,142,240,0.15);
+  color: #4f8ef0;
+  border: 1px solid rgba(79,142,240,0.4);
+  border-radius: 3px;
+  padding: 1px 5px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.face-model-panel__hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
 .face-model-panel__actions {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   margin-top: 4px;
 }
+
+.face-model-panel__auto {
+  padding: 5px 12px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.face-model-panel__auto:hover:not(:disabled) { color: var(--text); }
+.face-model-panel__auto:disabled { opacity: 0.5; cursor: default; }
 
 .face-model-panel__save {
   padding: 5px 16px;
@@ -816,8 +902,6 @@
   width: 100%;
   height: 100%;
   cursor: crosshair;
-  /* SVG の preserveAspectRatio="xMidYMid meet" が
-     object-fit:contain と同じ整合を行うため letterbox も自動対応 */
 }
 
 .bbox-rect {
@@ -829,8 +913,8 @@
 }
 
 .bbox-label-overlay {
-  position: absolute;
-  z-index: 20;
+  /* position: fixed は portal 側の inline style で指定 */
+  z-index: 10000;
   pointer-events: auto;
 }
 

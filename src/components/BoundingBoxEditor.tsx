@@ -1,4 +1,5 @@
-import { useRef, useState, useCallback } from 'react'; // useState: editState, preview
+import { useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import type { BoundingBox } from '../types';
 
@@ -12,7 +13,7 @@ type Drag =
   | { type: 'moving';   id: string; ox: number; oy: number; mx: number; my: number }
   | { type: 'resizing'; id: string; handle: Handle; orig: BoundingBox; mx: number; my: number };
 
-const MIN_SIZE = 0.01; // 正規化座標での最小ボックスサイズ
+const MIN_SIZE = 0.01;
 
 // ─── Component ────────────────────────────────────────────────
 
@@ -24,23 +25,20 @@ interface Props {
 export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
   const {
     boundingBoxes, addBoundingBox, updateBoundingBox, removeBoundingBox,
-    selectedBoxId, setSelectedBoxId,
+    selectedBoxId, setSelectedBoxId, annotationMode, classes,
   } = useStore();
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // dragRef でドラッグ状態を保持（再レンダーを最小化）
   const dragRef = useRef<Drag>({ type: 'none' });
   const [editState, setEditState] = useState<{ id: string; label: string } | null>(null);
-  // 作成中のプレビュー矩形のみ state で管理（表示更新が必要なため）
   const [preview, setPreview] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
-  // クライアント座標 → 正規化座標 (0-1) 変換
+  // Client coords → normalized (0-1) via SVG matrix (accounts for any CSS transform on ancestors)
   const toNorm = useCallback((cx: number, cy: number) => {
     const svg = svgRef.current;
     if (!svg || !naturalWidth || !naturalHeight) return { x: 0, y: 0 };
     const pt = svg.createSVGPoint();
-    pt.x = cx;
-    pt.y = cy;
+    pt.x = cx; pt.y = cy;
     const p = pt.matrixTransform(svg.getScreenCTM()!.inverse());
     return {
       x: Math.max(0, Math.min(1, p.x / naturalWidth)),
@@ -50,12 +48,10 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
 
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     const target = e.target as SVGElement;
-    // data-action を持つ最近傍の祖先要素を探す（<circle> など子要素対応）
     const el = target.closest<SVGElement>('[data-action]') ?? target;
     const action = el.dataset.action;
     const boxId = el.dataset.boxId;
 
-    // delete / label は onClick で処理するので capture しない
     if (action === 'delete' || action === 'label') return;
 
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -73,20 +69,17 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
       if (!box) return;
       setSelectedBoxId(boxId);
       dragRef.current = {
-        type: 'resizing',
-        id: boxId,
+        type: 'resizing', id: boxId,
         handle: el.dataset.handle as Handle,
-        orig: { ...box },
-        mx: x, my: y,
+        orig: { ...box }, mx: x, my: y,
       };
 
     } else {
-      // 背景クリック → 作成開始
       setSelectedBoxId(null);
       setEditState(null);
       dragRef.current = { type: 'creating', x0: x, y0: y };
     }
-  }, [boundingBoxes, toNorm]);
+  }, [boundingBoxes, toNorm, setSelectedBoxId]);
 
   const onPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
@@ -95,15 +88,12 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
 
     if (drag.type === 'creating') {
       setPreview({
-        x: Math.min(drag.x0, x),
-        y: Math.min(drag.y0, y),
-        w: Math.abs(x - drag.x0),
-        h: Math.abs(y - drag.y0),
+        x: Math.min(drag.x0, x), y: Math.min(drag.y0, y),
+        w: Math.abs(x - drag.x0), h: Math.abs(y - drag.y0),
       });
 
     } else if (drag.type === 'moving') {
-      const dx = x - drag.mx;
-      const dy = y - drag.my;
+      const dx = x - drag.mx; const dy = y - drag.my;
       const box = boundingBoxes.find(b => b.id === drag.id);
       if (!box) return;
       updateBoundingBox(drag.id, {
@@ -112,32 +102,25 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
       });
 
     } else if (drag.type === 'resizing') {
-      const dx = x - drag.mx;
-      const dy = y - drag.my;
+      const dx = x - drag.mx; const dy = y - drag.my;
       const o = drag.orig;
       let bx = o.x, by = o.y, bw = o.width, bh = o.height;
-
       switch (drag.handle) {
         case 'tl':
-          bx = Math.max(0, Math.min(o.x + o.width - MIN_SIZE,  o.x + dx));
+          bx = Math.max(0, Math.min(o.x + o.width - MIN_SIZE, o.x + dx));
           by = Math.max(0, Math.min(o.y + o.height - MIN_SIZE, o.y + dy));
-          bw = o.x + o.width  - bx;
-          bh = o.y + o.height - by;
-          break;
+          bw = o.x + o.width  - bx; bh = o.y + o.height - by; break;
         case 'tr':
           by = Math.max(0, Math.min(o.y + o.height - MIN_SIZE, o.y + dy));
           bh = o.y + o.height - by;
-          bw = Math.min(1 - o.x, Math.max(MIN_SIZE, o.width + dx));
-          break;
+          bw = Math.min(1 - o.x, Math.max(MIN_SIZE, o.width + dx)); break;
         case 'bl':
           bx = Math.max(0, Math.min(o.x + o.width - MIN_SIZE, o.x + dx));
           bw = o.x + o.width - bx;
-          bh = Math.min(1 - o.y, Math.max(MIN_SIZE, o.height + dy));
-          break;
+          bh = Math.min(1 - o.y, Math.max(MIN_SIZE, o.height + dy)); break;
         case 'br':
           bw = Math.min(1 - o.x, Math.max(MIN_SIZE, o.width + dx));
-          bh = Math.min(1 - o.y, Math.max(MIN_SIZE, o.height + dy));
-          break;
+          bh = Math.min(1 - o.y, Math.max(MIN_SIZE, o.height + dy)); break;
       }
       updateBoundingBox(drag.id, { x: bx, y: by, width: bw, height: bh });
     }
@@ -150,7 +133,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
         id: `bbox-${Date.now()}`,
         x: preview.x, y: preview.y,
         width: preview.w, height: preview.h,
-        label: 'object',
+        label: classes[0] ?? 'object',
         confidence: 1.0,
       };
       addBoundingBox(box);
@@ -158,29 +141,27 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
     }
     dragRef.current = { type: 'none' };
     setPreview(null);
-  }, [preview, addBoundingBox]);
+  }, [preview, addBoundingBox, setSelectedBoxId, classes]);
 
-  // ── 描画スケール ──────────────────────────────────────────
+  // ── Drawing scale ─────────────────────────────────────────
   const W = naturalWidth  || 1;
   const H = naturalHeight || 1;
-  const fs = Math.max(10, Math.min(W, H) * 0.022); // フォントサイズ (SVG単位)
-  const hr = Math.max(5,  Math.min(W, H) * 0.009); // ハンドル半幅
+  const fs = Math.max(10, Math.min(W, H) * 0.022);
+  const hr = Math.max(5,  Math.min(W, H) * 0.009);
 
-  // SVG ユーザー座標 → .media-viewer 相対ピクセル座標 変換
+  // SVG user coords → viewport (screen) coordinates for portal overlay
   const toScreenPos = useCallback((svgX: number, svgY: number) => {
     const svg = svgRef.current;
     if (!svg) return null;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
     const pt = svg.createSVGPoint();
-    pt.x = svgX;
-    pt.y = svgY;
+    pt.x = svgX; pt.y = svgY;
     const sp = pt.matrixTransform(ctm);
-    const pr = svg.parentElement!.getBoundingClientRect();
-    return { x: sp.x - pr.left, y: sp.y - pr.top, scale: ctm.a };
+    // Returns viewport coordinates (used with position:fixed in a portal)
+    return { x: sp.x, y: sp.y, scale: ctm.a };
   }, []);
 
-  // ラベル編集オーバーレイの位置を計算
   const labelOverlay = (() => {
     if (!editState) return null;
     const box = boundingBoxes.find(b => b.id === editState.id);
@@ -200,7 +181,10 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className="bbox-editor"
-        style={{ overflow: 'visible' }}
+        style={{
+          overflow: 'visible',
+          pointerEvents: annotationMode ? 'auto' : 'none',
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -211,11 +195,9 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
           const sel = box.id === selectedBoxId;
           const stroke = sel ? '#f0b429' : '#4f8ef0';
           const labelText = box.age != null
-            ? `${box.label} (${box.age}歳)`
-            : box.label;
+            ? `${box.label} (${box.age}歳)` : box.label;
           const confText = box.confidence < 1.0
-            ? ` ${Math.round(box.confidence * 100)}%`
-            : '';
+            ? ` ${Math.round(box.confidence * 100)}%` : '';
 
           const handles: { h: Handle; x: number; y: number; cur: string }[] = [
             { h: 'tl', x: px,      y: py,      cur: 'nw-resize' },
@@ -226,26 +208,20 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
 
           return (
             <g key={box.id}>
-              {/* ボックス本体 */}
               <rect
                 x={px} y={py} width={pw} height={ph}
                 fill={sel ? 'rgba(240,180,41,0.08)' : 'rgba(79,142,240,0.10)'}
-                stroke={stroke}
-                strokeWidth={sel ? 2.5 : 1.5}
-                data-action="move"
-                data-box-id={box.id}
+                stroke={stroke} strokeWidth={sel ? 2.5 : 1.5}
+                data-action="move" data-box-id={box.id}
                 style={{ cursor: 'move' }}
               />
-
-              {/* ラベルバッジ（クリックで編集開始） */}
               <rect
                 x={px} y={py - fs * 1.6}
                 width={Math.max(pw, (labelText + confText).length * fs * 0.6)}
                 height={fs * 1.6}
                 fill={sel ? 'rgba(240,180,41,0.9)' : 'rgba(79,142,240,0.9)'}
                 rx={3}
-                data-action="label"
-                data-box-id={box.id}
+                data-action="label" data-box-id={box.id}
                 style={{ cursor: 'text' }}
                 onClick={e => {
                   e.stopPropagation();
@@ -253,7 +229,6 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
                   setEditState({ id: box.id, label: box.label });
                 }}
               />
-              {/* ラベルテキスト */}
               <text
                 x={px + fs * 0.3} y={py - fs * 0.35}
                 fontSize={fs} fill="white" fontWeight="600"
@@ -261,11 +236,8 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
               >
                 {labelText}{confText}
               </text>
-
-              {/* 削除ボタン */}
               <g
-                data-action="delete"
-                data-box-id={box.id}
+                data-action="delete" data-box-id={box.id}
                 style={{ cursor: 'pointer' }}
                 onClick={e => { e.stopPropagation(); removeBoundingBox(box.id); }}
               >
@@ -277,30 +249,22 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
                 >×</text>
               </g>
-
-              {/* 選択時: ラベル編集ヒント */}
               {sel && !editState && (
                 <text
                   x={px + pw / 2} y={py + ph / 2}
                   textAnchor="middle" dominantBaseline="central"
-                  fontSize={fs * 0.85}
-                  fill="rgba(255,255,255,0.45)"
+                  fontSize={fs * 0.85} fill="rgba(255,255,255,0.45)"
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
                 >
                   ラベルをクリックして編集
                 </text>
               )}
-
-              {/* リサイズハンドル（選択時のみ） */}
               {sel && handles.map(({ h, x: hx, y: hy, cur }) => (
                 <rect
                   key={h}
-                  x={hx - hr} y={hy - hr}
-                  width={hr * 2} height={hr * 2}
+                  x={hx - hr} y={hy - hr} width={hr * 2} height={hr * 2}
                   fill="white" stroke={stroke} strokeWidth={1.5} rx={2}
-                  data-action="resize"
-                  data-box-id={box.id}
-                  data-handle={h}
+                  data-action="resize" data-box-id={box.id} data-handle={h}
                   style={{ cursor: cur }}
                 />
               ))}
@@ -308,7 +272,6 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
           );
         })}
 
-        {/* 作成中プレビュー */}
         {preview && preview.w > 0 && preview.h > 0 && (
           <rect
             x={preview.x * W} y={preview.y * H}
@@ -321,13 +284,20 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
         )}
       </svg>
 
-      {/* ラベル編集オーバーレイ（SVG 外の HTML 要素として配置） */}
-      {editState && labelOverlay && (
+      {/* ラベル編集オーバーレイ: Portal で document.body に挿入し
+          CSS transform の影響を受けずに position:fixed で配置 */}
+      {editState && labelOverlay && createPortal(
         <div
           className="bbox-label-overlay"
-          style={{ left: labelOverlay.left, top: labelOverlay.top, width: labelOverlay.width }}
+          style={{
+            position: 'fixed',
+            left: labelOverlay.left,
+            top: labelOverlay.top,
+            width: labelOverlay.width,
+          }}
         >
           <input
+            list="bbox-class-suggestions"
             value={editState.label}
             onChange={e => setEditState({ id: editState.id, label: e.target.value })}
             onKeyDown={e => {
@@ -345,7 +315,13 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           />
-        </div>
+          {classes.length > 0 && (
+            <datalist id="bbox-class-suggestions">
+              {classes.map(c => <option key={c} value={c} />)}
+            </datalist>
+          )}
+        </div>,
+        document.body
       )}
     </>
   );

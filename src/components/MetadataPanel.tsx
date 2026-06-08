@@ -7,32 +7,39 @@ import type { MediaMetadata } from '../types';
 
 // 選択中ボックスのラベルをインライン編集するコンポーネント
 function LabelInput({ id, label }: { id: string; label: string }) {
-  const { updateBoundingBox } = useStore();
+  const { updateBoundingBox, classes } = useStore();
   const [value, setValue] = useState(label);
 
-  // SVG 側で変更された場合に同期
   useEffect(() => { setValue(label); }, [label]);
 
   const commit = (v: string) => {
-    const trimmed = v.trim() || label; // 空文字は元に戻す
+    const trimmed = v.trim() || label;
     setValue(trimmed);
     if (trimmed !== label) updateBoundingBox(id, { label: trimmed });
   };
 
   return (
-    <input
-      className="detection-item__label-input"
-      value={value}
-      onChange={e => setValue(e.target.value)}
-      onBlur={e => commit(e.target.value)}
-      onClick={e => e.stopPropagation()}
-      onKeyDown={e => {
-        e.stopPropagation();
-        if (e.key === 'Enter') e.currentTarget.blur();
-        if (e.key === 'Escape') { setValue(label); e.currentTarget.blur(); }
-      }}
-      title="Enter で確定 / Esc でキャンセル"
-    />
+    <>
+      <input
+        list="panel-class-suggestions"
+        className="detection-item__label-input"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={e => commit(e.target.value)}
+        onClick={e => e.stopPropagation()}
+        onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') { setValue(label); e.currentTarget.blur(); }
+        }}
+        title="Enter で確定 / Esc でキャンセル"
+      />
+      {classes.length > 0 && (
+        <datalist id="panel-class-suggestions">
+          {classes.map(c => <option key={c} value={c} />)}
+        </datalist>
+      )}
+    </>
   );
 }
 
