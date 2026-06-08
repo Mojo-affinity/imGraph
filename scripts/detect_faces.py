@@ -1,23 +1,34 @@
 #!/usr/bin/env python3
 """
 顔検出 + 年齢推定スクリプト（InsightFace 使用）
-stdout に JSON 配列を出力する。エラーは stderr に出力して exit(1)。
+stdout に JSON 配列のみを出力する。ライブラリの余分な出力は stderr へ。
 
 必要パッケージ:
     pip install insightface onnxruntime opencv-python
-
-モデル:
-    初回実行時に InsightFace が buffalo_sc を
-    ~/.insightface/models/buffalo_sc/ へ自動ダウンロードする。
-    --model-dir でダウンロード先ルートを変更可能。
 
 使用例:
     python3 detect_faces.py --image /path/to/image.jpg
     python3 detect_faces.py --image /path/to/image.jpg --model-dir /custom/root
 """
 import sys
+import os
 import json
 import argparse
+
+# ── stdout 汚染対策 ──────────────────────────────────────────
+# insightface / onnxruntime が C レベルで stdout (fd=1) に書き込む場合があるため、
+# 処理中は fd=1 を stderr (fd=2) にリダイレクトし、
+# 最後に元の fd=1 へ JSON のみを書き込む。
+_saved_stdout_fd = os.dup(1)
+os.dup2(2, 1)                       # fd=1 → stderr
+sys.stdout = open(os.devnull, 'w')  # Python 層も念のため
+
+
+def _write_json(obj: object) -> None:
+    """元の stdout fd に JSON を書き込む。"""
+    data = (json.dumps(obj, ensure_ascii=False) + '\n').encode()
+    os.write(_saved_stdout_fd, data)
+    os.close(_saved_stdout_fd)
 
 
 def main() -> None:
@@ -47,7 +58,7 @@ def main() -> None:
 
     try:
         app = FaceAnalysis(**init_kwargs)
-        app.prepare(ctx_id=-1, det_thresh=args.det_thresh)  # ctx_id=-1 = CPU
+        app.prepare(ctx_id=-1, det_thresh=args.det_thresh)
     except Exception as e:
         print(f"モデルロードエラー: {e}", file=sys.stderr)
         sys.exit(1)
@@ -93,7 +104,7 @@ def main() -> None:
             "age": age,
         })
 
-    print(json.dumps(boxes, ensure_ascii=False))
+    _write_json(boxes)
 
 
 if __name__ == "__main__":

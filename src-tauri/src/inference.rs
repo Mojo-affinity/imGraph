@@ -97,8 +97,24 @@ pub async fn run_face_detection(
     }
 
     let stdout = String::from_utf8_lossy(&result.stdout);
+
+    // ライブラリが stdout に余分な行を混入する場合があるため、
+    // '[' で始まる最後の行を JSON として扱う
+    let json_str = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('['))
+        .ok_or_else(|| {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            format!(
+                "JSON 出力が見つかりません\nstdout: {}\nstderr: {}",
+                stdout.trim(),
+                stderr.trim()
+            )
+        })?;
+
     let mut boxes: Vec<BoundingBox> =
-        serde_json::from_str(&stdout).map_err(|e| format!("JSON パースエラー: {}", e))?;
+        serde_json::from_str(json_str).map_err(|e| format!("JSON パースエラー: {}", e))?;
 
     // スクリプト側の仮 ID をアトミックカウンタ由来の一意 ID に差し替え
     for b in &mut boxes {
