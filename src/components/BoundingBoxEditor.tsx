@@ -48,17 +48,6 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
     };
   }, [naturalWidth, naturalHeight]);
 
-  const onDoubleClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
-    const target = e.target as SVGElement;
-    const el = target.closest<SVGElement>('[data-action]') ?? target;
-    const action = el.dataset.action;
-    const boxId = el.dataset.boxId;
-    if (action === 'move' && boxId) {
-      const box = boundingBoxes.find(b => b.id === boxId);
-      if (box) setEditState({ id: boxId, label: box.label });
-    }
-  }, [boundingBoxes]);
-
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     const target = e.target as SVGElement;
     // data-action を持つ最近傍の祖先要素を探す（<circle> など子要素対応）
@@ -66,7 +55,8 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
     const action = el.dataset.action;
     const boxId = el.dataset.boxId;
 
-    if (action === 'delete') return; // onClick で処理（capture しない）
+    // delete / label は onClick で処理するので capture しない
+    if (action === 'delete' || action === 'label') return;
 
     e.currentTarget.setPointerCapture(e.pointerId);
     const { x, y } = toNorm(e.clientX, e.clientY);
@@ -210,10 +200,10 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className="bbox-editor"
+        style={{ overflow: 'visible' }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onDoubleClick={onDoubleClick}
       >
         {boundingBoxes.map(box => {
           const px = box.x * W,     py = box.y * H;
@@ -247,14 +237,21 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
                 style={{ cursor: 'move' }}
               />
 
-              {/* ラベル背景 */}
+              {/* ラベルバッジ（クリックで編集開始） */}
               <rect
                 x={px} y={py - fs * 1.6}
                 width={Math.max(pw, (labelText + confText).length * fs * 0.6)}
                 height={fs * 1.6}
                 fill={sel ? 'rgba(240,180,41,0.9)' : 'rgba(79,142,240,0.9)'}
                 rx={3}
-                style={{ pointerEvents: 'none' }}
+                data-action="label"
+                data-box-id={box.id}
+                style={{ cursor: 'text' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  setSelectedBoxId(box.id);
+                  setEditState({ id: box.id, label: box.label });
+                }}
               />
               {/* ラベルテキスト */}
               <text
@@ -290,7 +287,7 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
                   fill="rgba(255,255,255,0.45)"
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
                 >
-                  ダブルクリックでラベル編集
+                  ラベルをクリックして編集
                 </text>
               )}
 

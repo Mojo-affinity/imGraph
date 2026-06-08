@@ -5,6 +5,37 @@ import type { MediaMetadata } from '../types';
 
 // ─── 検出結果リスト ────────────────────────────────────────────
 
+// 選択中ボックスのラベルをインライン編集するコンポーネント
+function LabelInput({ id, label }: { id: string; label: string }) {
+  const { updateBoundingBox } = useStore();
+  const [value, setValue] = useState(label);
+
+  // SVG 側で変更された場合に同期
+  useEffect(() => { setValue(label); }, [label]);
+
+  const commit = (v: string) => {
+    const trimmed = v.trim() || label; // 空文字は元に戻す
+    setValue(trimmed);
+    if (trimmed !== label) updateBoundingBox(id, { label: trimmed });
+  };
+
+  return (
+    <input
+      className="detection-item__label-input"
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={e => commit(e.target.value)}
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') { setValue(label); e.currentTarget.blur(); }
+      }}
+      title="Enter で確定 / Esc でキャンセル"
+    />
+  );
+}
+
 function DetectionList() {
   const {
     boundingBoxes, selectedBoxId, setSelectedBoxId,
@@ -39,26 +70,33 @@ function DetectionList() {
         <p className="detection-empty">検出されませんでした</p>
       ) : (
         <div className="detection-list">
-          {boundingBoxes.map((box) => (
-            <div
-              key={box.id}
-              className={`detection-item${box.id === selectedBoxId ? ' detection-item--selected' : ''}`}
-              onClick={() => setSelectedBoxId(box.id === selectedBoxId ? null : box.id)}
-            >
-              <span className="detection-item__label">{box.label}</span>
-              {box.age != null && (
-                <span className="detection-item__age">{box.age}歳</span>
-              )}
-              <span className="detection-item__conf">
-                {Math.round(box.confidence * 100)}%
-              </span>
-              <button
-                className="detection-item__del"
-                title="削除"
-                onClick={(e) => { e.stopPropagation(); removeBoundingBox(box.id); }}
-              >×</button>
-            </div>
-          ))}
+          {boundingBoxes.map((box) => {
+            const sel = box.id === selectedBoxId;
+            return (
+              <div
+                key={box.id}
+                className={`detection-item${sel ? ' detection-item--selected' : ''}`}
+                onClick={() => setSelectedBoxId(sel ? null : box.id)}
+              >
+                {sel ? (
+                  <LabelInput id={box.id} label={box.label} />
+                ) : (
+                  <span className="detection-item__label">{box.label}</span>
+                )}
+                {box.age != null && (
+                  <span className="detection-item__age">{box.age}歳</span>
+                )}
+                <span className="detection-item__conf">
+                  {Math.round(box.confidence * 100)}%
+                </span>
+                <button
+                  className="detection-item__del"
+                  title="削除"
+                  onClick={(e) => { e.stopPropagation(); removeBoundingBox(box.id); }}
+                >×</button>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

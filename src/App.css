@@ -548,6 +548,19 @@
   white-space: nowrap;
 }
 
+.detection-item__label-input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
+  font-weight: 500;
+  outline: none;
+  min-width: 0;
+}
+
 .detection-item__age {
   font-size: 11px;
   color: var(--text-2);
