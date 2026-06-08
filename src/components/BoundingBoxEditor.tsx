@@ -176,156 +176,180 @@ export function BoundingBoxEditor({ naturalWidth, naturalHeight }: Props) {
   const fs = Math.max(10, Math.min(W, H) * 0.022); // フォントサイズ (SVG単位)
   const hr = Math.max(5,  Math.min(W, H) * 0.009); // ハンドル半幅
 
+  // SVG ユーザー座標 → .media-viewer 相対ピクセル座標 変換
+  const toScreenPos = useCallback((svgX: number, svgY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = svgX;
+    pt.y = svgY;
+    const sp = pt.matrixTransform(ctm);
+    const pr = svg.parentElement!.getBoundingClientRect();
+    return { x: sp.x - pr.left, y: sp.y - pr.top, scale: ctm.a };
+  }, []);
+
+  // ラベル編集オーバーレイの位置を計算
+  const labelOverlay = (() => {
+    if (!editState) return null;
+    const box = boundingBoxes.find(b => b.id === editState.id);
+    if (!box) return null;
+    const cx = (box.x + box.width / 2) * W;
+    const cy = (box.y + box.height / 2) * H;
+    const pos = toScreenPos(cx, cy);
+    if (!pos) return null;
+    const boxScreenW = Math.max(120, box.width * W * pos.scale);
+    return { left: pos.x - boxScreenW / 2, top: pos.y - 14, width: boxScreenW };
+  })();
+
   return (
-    <svg
-      ref={svgRef}
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid meet"
-      className="bbox-editor"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onDoubleClick={onDoubleClick}
-    >
-      {boundingBoxes.map(box => {
-        const px = box.x * W,     py = box.y * H;
-        const pw = box.width * W, ph = box.height * H;
-        const sel = box.id === selectedBoxId;
-        const stroke = sel ? '#f0b429' : '#4f8ef0';
-        const labelText = box.age != null
-          ? `${box.label} (${box.age}歳)`
-          : box.label;
-        const confText = box.confidence < 1.0
-          ? ` ${Math.round(box.confidence * 100)}%`
-          : '';
+    <>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="bbox-editor"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={onDoubleClick}
+      >
+        {boundingBoxes.map(box => {
+          const px = box.x * W,     py = box.y * H;
+          const pw = box.width * W, ph = box.height * H;
+          const sel = box.id === selectedBoxId;
+          const stroke = sel ? '#f0b429' : '#4f8ef0';
+          const labelText = box.age != null
+            ? `${box.label} (${box.age}歳)`
+            : box.label;
+          const confText = box.confidence < 1.0
+            ? ` ${Math.round(box.confidence * 100)}%`
+            : '';
 
-        const handles: { h: Handle; x: number; y: number; cur: string }[] = [
-          { h: 'tl', x: px,      y: py,      cur: 'nw-resize' },
-          { h: 'tr', x: px + pw, y: py,      cur: 'ne-resize' },
-          { h: 'bl', x: px,      y: py + ph, cur: 'sw-resize' },
-          { h: 'br', x: px + pw, y: py + ph, cur: 'se-resize' },
-        ];
+          const handles: { h: Handle; x: number; y: number; cur: string }[] = [
+            { h: 'tl', x: px,      y: py,      cur: 'nw-resize' },
+            { h: 'tr', x: px + pw, y: py,      cur: 'ne-resize' },
+            { h: 'bl', x: px,      y: py + ph, cur: 'sw-resize' },
+            { h: 'br', x: px + pw, y: py + ph, cur: 'se-resize' },
+          ];
 
-        return (
-          <g key={box.id}>
-            {/* ボックス本体 */}
-            <rect
-              x={px} y={py} width={pw} height={ph}
-              fill={sel ? 'rgba(240,180,41,0.08)' : 'rgba(79,142,240,0.10)'}
-              stroke={stroke}
-              strokeWidth={sel ? 2.5 : 1.5}
-              data-action="move"
-              data-box-id={box.id}
-              style={{ cursor: 'move' }}
-            />
-
-            {/* ラベル背景 */}
-            <rect
-              x={px} y={py - fs * 1.6}
-              width={Math.max(pw, (labelText + confText).length * fs * 0.6)}
-              height={fs * 1.6}
-              fill={sel ? 'rgba(240,180,41,0.9)' : 'rgba(79,142,240,0.9)'}
-              rx={3}
-              style={{ pointerEvents: 'none' }}
-            />
-            {/* ラベルテキスト */}
-            <text
-              x={px + fs * 0.3} y={py - fs * 0.35}
-              fontSize={fs} fill="white" fontWeight="600"
-              style={{ pointerEvents: 'none', userSelect: 'none' }}
-            >
-              {labelText}{confText}
-            </text>
-
-            {/* 削除ボタン */}
-            <g
-              data-action="delete"
-              data-box-id={box.id}
-              style={{ cursor: 'pointer' }}
-              onClick={e => { e.stopPropagation(); removeBoundingBox(box.id); }}
-            >
-              <circle cx={px + pw} cy={py} r={fs * 0.8} fill="#e05555" />
-              <text
-                x={px + pw} y={py}
-                textAnchor="middle" dominantBaseline="central"
-                fontSize={fs} fill="white" fontWeight="bold"
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >×</text>
-            </g>
-
-            {/* 選択時: ラベル編集ヒント / インライン入力 */}
-            {sel && !editState?.id && (
-              <text
-                x={px + pw / 2} y={py + ph / 2}
-                textAnchor="middle" dominantBaseline="central"
-                fontSize={fs * 0.85}
-                fill="rgba(255,255,255,0.45)"
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                ダブルクリックでラベル編集
-              </text>
-            )}
-            {sel && editState?.id === box.id && (
-              <foreignObject
-                x={px + pw * 0.05} y={py + ph / 2 - fs * 1.1}
-                width={pw * 0.9} height={fs * 2.2}
-              >
-                <input
-                  value={editState.label}
-                  onChange={e => setEditState({ id: box.id, label: e.target.value })}
-                  onKeyDown={e => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') {
-                      updateBoundingBox(box.id, { label: editState.label });
-                      setEditState(null);
-                    }
-                    if (e.key === 'Escape') setEditState(null);
-                  }}
-                  onBlur={() => {
-                    updateBoundingBox(box.id, { label: editState.label });
-                    setEditState(null);
-                  }}
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                  style={{
-                    width: '100%', height: '100%',
-                    background: '#141414', color: '#e8e8e8',
-                    border: '2px solid #4f8ef0', borderRadius: '4px',
-                    padding: `${fs * 0.15}px ${fs * 0.3}px`,
-                    fontSize: `${fs}px`, outline: 'none',
-                  }}
-                />
-              </foreignObject>
-            )}
-
-            {/* リサイズハンドル（選択時のみ） */}
-            {sel && handles.map(({ h, x: hx, y: hy, cur }) => (
+          return (
+            <g key={box.id}>
+              {/* ボックス本体 */}
               <rect
-                key={h}
-                x={hx - hr} y={hy - hr}
-                width={hr * 2} height={hr * 2}
-                fill="white" stroke={stroke} strokeWidth={1.5} rx={2}
-                data-action="resize"
+                x={px} y={py} width={pw} height={ph}
+                fill={sel ? 'rgba(240,180,41,0.08)' : 'rgba(79,142,240,0.10)'}
+                stroke={stroke}
+                strokeWidth={sel ? 2.5 : 1.5}
+                data-action="move"
                 data-box-id={box.id}
-                data-handle={h}
-                style={{ cursor: cur }}
+                style={{ cursor: 'move' }}
               />
-            ))}
-          </g>
-        );
-      })}
 
-      {/* 作成中プレビュー */}
-      {preview && preview.w > 0 && preview.h > 0 && (
-        <rect
-          x={preview.x * W} y={preview.y * H}
-          width={preview.w * W} height={preview.h * H}
-          fill="rgba(79,142,240,0.06)"
-          stroke="#4f8ef0" strokeWidth={1.5}
-          strokeDasharray={`${W * 0.012} ${W * 0.006}`}
-          style={{ pointerEvents: 'none' }}
-        />
+              {/* ラベル背景 */}
+              <rect
+                x={px} y={py - fs * 1.6}
+                width={Math.max(pw, (labelText + confText).length * fs * 0.6)}
+                height={fs * 1.6}
+                fill={sel ? 'rgba(240,180,41,0.9)' : 'rgba(79,142,240,0.9)'}
+                rx={3}
+                style={{ pointerEvents: 'none' }}
+              />
+              {/* ラベルテキスト */}
+              <text
+                x={px + fs * 0.3} y={py - fs * 0.35}
+                fontSize={fs} fill="white" fontWeight="600"
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                {labelText}{confText}
+              </text>
+
+              {/* 削除ボタン */}
+              <g
+                data-action="delete"
+                data-box-id={box.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => { e.stopPropagation(); removeBoundingBox(box.id); }}
+              >
+                <circle cx={px + pw} cy={py} r={fs * 0.8} fill="#e05555" />
+                <text
+                  x={px + pw} y={py}
+                  textAnchor="middle" dominantBaseline="central"
+                  fontSize={fs} fill="white" fontWeight="bold"
+                  style={{ pointerEvents: 'none', userSelect: 'none' }}
+                >×</text>
+              </g>
+
+              {/* 選択時: ラベル編集ヒント */}
+              {sel && !editState && (
+                <text
+                  x={px + pw / 2} y={py + ph / 2}
+                  textAnchor="middle" dominantBaseline="central"
+                  fontSize={fs * 0.85}
+                  fill="rgba(255,255,255,0.45)"
+                  style={{ pointerEvents: 'none', userSelect: 'none' }}
+                >
+                  ダブルクリックでラベル編集
+                </text>
+              )}
+
+              {/* リサイズハンドル（選択時のみ） */}
+              {sel && handles.map(({ h, x: hx, y: hy, cur }) => (
+                <rect
+                  key={h}
+                  x={hx - hr} y={hy - hr}
+                  width={hr * 2} height={hr * 2}
+                  fill="white" stroke={stroke} strokeWidth={1.5} rx={2}
+                  data-action="resize"
+                  data-box-id={box.id}
+                  data-handle={h}
+                  style={{ cursor: cur }}
+                />
+              ))}
+            </g>
+          );
+        })}
+
+        {/* 作成中プレビュー */}
+        {preview && preview.w > 0 && preview.h > 0 && (
+          <rect
+            x={preview.x * W} y={preview.y * H}
+            width={preview.w * W} height={preview.h * H}
+            fill="rgba(79,142,240,0.06)"
+            stroke="#4f8ef0" strokeWidth={1.5}
+            strokeDasharray={`${W * 0.012} ${W * 0.006}`}
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
+      </svg>
+
+      {/* ラベル編集オーバーレイ（SVG 外の HTML 要素として配置） */}
+      {editState && labelOverlay && (
+        <div
+          className="bbox-label-overlay"
+          style={{ left: labelOverlay.left, top: labelOverlay.top, width: labelOverlay.width }}
+        >
+          <input
+            value={editState.label}
+            onChange={e => setEditState({ id: editState.id, label: e.target.value })}
+            onKeyDown={e => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                updateBoundingBox(editState.id, { label: editState.label });
+                setEditState(null);
+              }
+              if (e.key === 'Escape') setEditState(null);
+            }}
+            onBlur={() => {
+              updateBoundingBox(editState.id, { label: editState.label });
+              setEditState(null);
+            }}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+          />
+        </div>
       )}
-    </svg>
+    </>
   );
 }

@@ -609,6 +609,24 @@
   cursor: pointer;
 }
 
+.bbox-label-overlay {
+  position: absolute;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.bbox-label-overlay input {
+  width: 100%;
+  background: #141414;
+  color: #e8e8e8;
+  border: 2px solid #4f8ef0;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
 /* ── Metadata Panel ───────────────────────────────── */
 .metadata-panel {
   width: var(--meta-w);
