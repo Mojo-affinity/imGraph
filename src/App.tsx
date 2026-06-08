@@ -24,6 +24,7 @@ function App() {
       <Toolbar
         currentDir={store.currentDir}
         fileCount={store.files.length}
+        isScanning={store.isScanning}
         onOpenDirectory={store.openDirectory}
       />
       {store.error && (

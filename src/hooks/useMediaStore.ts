@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { MediaFile, MediaMetadata, MetadataMap } from '../types';
 
@@ -8,25 +9,63 @@ export function useMediaStore() {
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [metadata, setMetadata] = useState<MetadataMap>({});
+  const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 進行中スキャンのリスナーを保持し、新しいスキャン開始時に解除する
+  const unlistenRefs = useRef<UnlistenFn[]>([]);
+
+  const stopListeners = useCallback(() => {
+    unlistenRefs.current.forEach((fn) => fn());
+    unlistenRefs.current = [];
+  }, []);
 
   const openDirectory = useCallback(async () => {
     try {
       const selected = await open({ directory: true, multiple: false });
       if (!selected || typeof selected !== 'string') return;
 
-      const scanned = await invoke<MediaFile[]>('scan_directory', { path: selected });
-      const meta = await invoke<MetadataMap>('load_metadata', { dirPath: selected });
+      // 前回のスキャンが続いていれば中断
+      stopListeners();
 
       setCurrentDir(selected);
-      setFiles(scanned);
-      setMetadata(meta);
-      setSelectedIndex(scanned.length > 0 ? 0 : null);
+      setFiles([]);
+      setSelectedIndex(null);
+      setMetadata({});
+      setIsScanning(true);
       setError(null);
+
+      // イベントリスナーを invoke より先に登録してイベントを取りこぼさない
+      const unlistenBatch = await listen<MediaFile[]>('scan-batch', (event) => {
+        setFiles((prev) => [...prev, ...event.payload]);
+      });
+
+      const unlistenComplete = await listen('scan-complete', async () => {
+        stopListeners();
+        // rel_path でソート
+        setFiles((prev) =>
+          [...prev].sort((a, b) =>
+            a.rel_path.toLowerCase().localeCompare(b.rel_path.toLowerCase())
+          )
+        );
+        setIsScanning(false);
+        try {
+          const meta = await invoke<MetadataMap>('load_metadata', { dirPath: selected });
+          setMetadata(meta);
+        } catch (e) {
+          setError(String(e));
+        }
+      });
+
+      unlistenRefs.current = [unlistenBatch, unlistenComplete];
+
+      await invoke('scan_directory', { path: selected });
     } catch (e) {
       setError(String(e));
+      setIsScanning(false);
+      stopListeners();
     }
-  }, []);
+  }, [stopListeners]);
 
   const selectFile = useCallback((index: number) => {
     setSelectedIndex(index);
@@ -58,7 +97,7 @@ export function useMediaStore() {
     setSelectedIndex((i) => (i !== null && i < files.length - 1 ? i + 1 : i));
   }, [files.length]);
 
-  const selectedFile = selectedIndex !== null ? files[selectedIndex] ?? null : null;
+  const selectedFile = selectedIndex !== null ? (files[selectedIndex] ?? null) : null;
   const selectedMetadata = selectedFile
     ? (metadata[selectedFile.path] ?? { tags: [], rating: 0 })
     : null;
@@ -70,6 +109,7 @@ export function useMediaStore() {
     selectedFile,
     selectedMetadata,
     metadata,
+    isScanning,
     error,
     openDirectory,
     selectFile,

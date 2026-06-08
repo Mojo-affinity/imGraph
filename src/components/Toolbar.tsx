@@ -1,20 +1,28 @@
 interface ToolbarProps {
   currentDir: string | null;
   fileCount: number;
+  isScanning: boolean;
   onOpenDirectory: () => void;
 }
 
-export function Toolbar({ currentDir, fileCount, onOpenDirectory }: ToolbarProps) {
+export function Toolbar({ currentDir, fileCount, isScanning, onOpenDirectory }: ToolbarProps) {
   return (
     <div className="toolbar">
-      <button className="toolbar__open-btn" onClick={onOpenDirectory}>
+      <button className="toolbar__open-btn" onClick={onOpenDirectory} disabled={isScanning}>
         <FolderIcon />
         フォルダを開く
       </button>
       {currentDir && (
         <span className="toolbar__info">
           <span className="toolbar__path">{currentDir}</span>
-          <span className="toolbar__count">{fileCount} 件</span>
+          {isScanning ? (
+            <span className="toolbar__scanning">
+              <span className="toolbar__spinner" />
+              スキャン中… {fileCount > 0 && `${fileCount} 件`}
+            </span>
+          ) : (
+            <span className="toolbar__count">{fileCount} 件</span>
+          )}
         </span>
       )}
     </div>

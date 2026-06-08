@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tauri::Emitter;
 use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,64 +30,81 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "webm", "mkv", "avi", "mov", "wmv", "m4v", "ogv",
 ];
 
-fn metadata_path(dir_path: &str) -> std::path::PathBuf {
+fn metadata_path(dir_path: &str) -> PathBuf {
     Path::new(dir_path).join(".imgraph.json")
 }
 
+fn make_media_file(file_path: &Path, root: &Path) -> Option<MediaFile> {
+    let ext = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let media_type = if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        "image"
+    } else if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+        "video"
+    } else {
+        return None;
+    };
+
+    let name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let rel_path = file_path
+        .strip_prefix(root)
+        .unwrap_or(file_path)
+        .to_string_lossy()
+        .to_string();
+
+    Some(MediaFile {
+        path: file_path.to_string_lossy().to_string(),
+        name,
+        rel_path,
+        ext,
+        media_type: media_type.to_string(),
+    })
+}
+
+// バックグラウンドで再帰スキャンし、BATCH_SIZE件ごとにイベントを emit する。
+// 完了時に scan-complete イベントを emit する。
 #[tauri::command]
-fn scan_directory(path: String) -> Result<Vec<MediaFile>, String> {
-    let root = Path::new(&path);
+async fn scan_directory(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err(format!("ディレクトリではありません: {}", path));
     }
 
-    let mut files = Vec::new();
+    tauri::async_runtime::spawn(async move {
+        const BATCH_SIZE: usize = 50;
+        let mut batch: Vec<MediaFile> = Vec::with_capacity(BATCH_SIZE);
 
-    for entry in WalkDir::new(root)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let file_path = entry.path();
+        for entry in WalkDir::new(&root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            if let Some(file) = make_media_file(entry.path(), &root) {
+                batch.push(file);
+                if batch.len() >= BATCH_SIZE {
+                    app.emit("scan-batch", &batch).ok();
+                    batch.clear();
+                }
+            }
+        }
 
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+        if !batch.is_empty() {
+            app.emit("scan-batch", &batch).ok();
+        }
+        app.emit("scan-complete", ()).ok();
+    });
 
-        let media_type = if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-            "image"
-        } else if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
-            "video"
-        } else {
-            continue;
-        };
-
-        let name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        let rel_path = file_path
-            .strip_prefix(root)
-            .unwrap_or(file_path)
-            .to_string_lossy()
-            .to_string();
-
-        files.push(MediaFile {
-            path: file_path.to_string_lossy().to_string(),
-            name,
-            rel_path,
-            ext,
-            media_type: media_type.to_string(),
-        });
-    }
-
-    files.sort_by(|a, b| a.rel_path.to_lowercase().cmp(&b.rel_path.to_lowercase()));
-    Ok(files)
+    Ok(())
 }
 
 #[tauri::command]
