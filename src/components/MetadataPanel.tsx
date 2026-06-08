@@ -191,20 +191,114 @@ export function MetadataPanel({ fileName, metadata, onUpdate }: MetadataPanelPro
   );
 }
 
+// ─── データセット生成パネル ────────────────────────────────────
+
+function DatasetGenPanel({
+  onGenerated,
+}: {
+  onGenerated: (yamlPath: string) => void;
+}) {
+  const { currentDir, isGeneratingDataset, lastDatasetInfo, generateDataset } = useStore();
+  const [outputDir, setOutputDir] = useState('');
+  const [valRatio, setValRatio] = useState(20); // %
+  const [genError, setGenError] = useState<string | null>(null);
+
+  // currentDir が変わったら出力先をデフォルト設定
+  useEffect(() => {
+    if (currentDir) setOutputDir(currentDir + '/dataset');
+  }, [currentDir]);
+
+  const pickOutputDir = async () => {
+    const path = await open({ multiple: false, directory: true });
+    if (path && typeof path === 'string') setOutputDir(path);
+  };
+
+  const handleGenerate = async () => {
+    if (!currentDir || !outputDir) return;
+    setGenError(null);
+    try {
+      const info = await generateDataset(currentDir, outputDir, valRatio / 100);
+      onGenerated(info.yaml_path);
+    } catch (e) {
+      setGenError(String(e));
+    }
+  };
+
+  return (
+    <div className="dataset-gen-panel">
+      <p className="dataset-gen-panel__title">データセット構造を生成</p>
+      <p className="dataset-gen-panel__hint">
+        アノテーション済み画像を train / val に分割し、<br />
+        dataset.yaml を作成します。
+      </p>
+
+      <label className="training-config__label">出力先フォルダ</label>
+      <div className="training-config__row">
+        <input
+          className="training-config__input"
+          value={outputDir}
+          onChange={e => setOutputDir(e.target.value)}
+          placeholder="dataset フォルダのパス"
+          disabled={isGeneratingDataset}
+          onKeyDown={e => e.stopPropagation()}
+        />
+        <button
+          className="training-config__pick"
+          onClick={pickOutputDir}
+          disabled={isGeneratingDataset}
+          title="フォルダを選択"
+        >…</button>
+      </div>
+
+      <label className="training-config__label">
+        Val 割合: <strong>{valRatio}%</strong>
+        <span className="dataset-gen-panel__sub">（残り {100 - valRatio}% が Train）</span>
+      </label>
+      <input
+        className="dataset-gen-panel__slider"
+        type="range"
+        min={5} max={40} step={5}
+        value={valRatio}
+        onChange={e => setValRatio(Number(e.target.value))}
+        disabled={isGeneratingDataset}
+      />
+
+      {genError && (
+        <p className="dataset-gen-panel__error">{genError}</p>
+      )}
+
+      {lastDatasetInfo && !genError && (
+        <div className="dataset-gen-panel__result">
+          <span className="dataset-gen-panel__result-ok">✓ 生成完了</span>
+          <span>Train <strong>{lastDatasetInfo.train_count}</strong></span>
+          <span>Val <strong>{lastDatasetInfo.val_count}</strong></span>
+          <span>{lastDatasetInfo.class_names.length} クラス</span>
+        </div>
+      )}
+
+      <button
+        className="training-config__start"
+        onClick={handleGenerate}
+        disabled={isGeneratingDataset || !currentDir || !outputDir}
+      >
+        {isGeneratingDataset
+          ? <><span className="toolbar__spinner" />生成中…</>
+          : '⚙ データセットを生成'}
+      </button>
+    </div>
+  );
+}
+
 // ─── 学習セクション ────────────────────────────────────────────
 
 function TrainingSection() {
-  const { currentDir, isTraining, trainingLogs, startTraining } = useStore();
+  const { isTraining, trainingLogs, startTraining } = useStore();
   const [scriptPath, setScriptPath] = useState('');
-  const [datasetPath, setDatasetPath] = useState(currentDir ?? '');
+  const [datasetPath, setDatasetPath] = useState('');
   const [extraArgs, setExtraArgs] = useState('');
   const [open_, setOpen] = useState(false);
+  const [showGenPanel, setShowGenPanel] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
-
-  // currentDir が変わったらデータセットパスを自動更新
-  useEffect(() => {
-    if (currentDir) setDatasetPath(currentDir);
-  }, [currentDir]);
 
   // ログ末尾に自動スクロール
   useEffect(() => {
@@ -212,12 +306,20 @@ function TrainingSection() {
   }, [trainingLogs.length, isTraining]);
 
   const pickScript = async () => {
-    const path = await open({ multiple: false, directory: false, filters: [{ name: 'Python', extensions: ['py'] }] });
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Python', extensions: ['py'] }],
+    });
     if (path && typeof path === 'string') setScriptPath(path);
   };
 
   const pickDataset = async () => {
-    const path = await open({ multiple: false, directory: true });
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }],
+    });
     if (path && typeof path === 'string') setDatasetPath(path);
   };
 
@@ -243,7 +345,28 @@ function TrainingSection() {
 
       {open_ && (
         <div className="training-config">
-          {/* スクリプトパス */}
+          {/* ── B-1: データセット生成パネル ── */}
+          <button
+            className={`dataset-gen-toggle${showGenPanel ? ' dataset-gen-toggle--open' : ''}`}
+            onClick={() => setShowGenPanel(v => !v)}
+            disabled={isTraining}
+          >
+            <span className={`training-section__arrow${showGenPanel ? ' training-section__arrow--open' : ''}`}>▶</span>
+            データセット構造を生成
+          </button>
+
+          {showGenPanel && (
+            <DatasetGenPanel
+              onGenerated={(yamlPath) => {
+                setDatasetPath(yamlPath);
+                setShowGenPanel(false);
+              }}
+            />
+          )}
+
+          <div className="training-config__divider" />
+
+          {/* ── B-2: 学習設定 ── */}
           <label className="training-config__label">学習スクリプト</label>
           <div className="training-config__row">
             <input
@@ -252,34 +375,47 @@ function TrainingSection() {
               onChange={(e) => setScriptPath(e.target.value)}
               placeholder="train.py のパス"
               disabled={isTraining}
+              onKeyDown={e => e.stopPropagation()}
             />
-            <button className="training-config__pick" onClick={pickScript} disabled={isTraining} title="ファイルを選択">…</button>
+            <button
+              className="training-config__pick"
+              onClick={pickScript}
+              disabled={isTraining}
+              title="ファイルを選択"
+            >…</button>
           </div>
 
-          {/* データセットパス */}
-          <label className="training-config__label">データセット</label>
+          <label className="training-config__label">
+            データセット (dataset.yaml)
+            {datasetPath && <span className="dataset-gen-panel__sub"> ← 生成後に自動入力</span>}
+          </label>
           <div className="training-config__row">
             <input
               className="training-config__input"
               type="text" value={datasetPath}
               onChange={(e) => setDatasetPath(e.target.value)}
-              placeholder="データセットディレクトリ"
+              placeholder="dataset.yaml のパス"
               disabled={isTraining}
+              onKeyDown={e => e.stopPropagation()}
             />
-            <button className="training-config__pick" onClick={pickDataset} disabled={isTraining} title="フォルダを選択">…</button>
+            <button
+              className="training-config__pick"
+              onClick={pickDataset}
+              disabled={isTraining}
+              title="ファイルを選択"
+            >…</button>
           </div>
 
-          {/* 追加引数 */}
-          <label className="training-config__label">追加引数 (任意)</label>
+          <label className="training-config__label">追加引数（任意）</label>
           <input
             className="training-config__input"
             type="text" value={extraArgs}
             onChange={(e) => setExtraArgs(e.target.value)}
             placeholder="--epochs 100 --batch-size 16"
             disabled={isTraining}
+            onKeyDown={e => e.stopPropagation()}
           />
 
-          {/* 開始ボタン */}
           <button
             className={`training-config__start${isTraining ? ' training-config__start--running' : ''}`}
             onClick={handleStart}
@@ -290,7 +426,6 @@ function TrainingSection() {
               : '▶ 学習を開始'}
           </button>
 
-          {/* ログ表示 */}
           {hasLogs && (
             <div className="training-log">
               {trainingLogs.map((line, i) => (

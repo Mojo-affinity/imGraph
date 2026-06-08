@@ -719,6 +719,96 @@
 .training-log__line--err { color: #f87171; }
 .training-log__line--ok  { color: #4ade80; }
 
+/* ── データセット生成トグル ─────────────────────────── */
+.dataset-gen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.78rem;
+  padding: 5px 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  text-align: left;
+}
+.dataset-gen-toggle:hover:not(:disabled) { background: var(--surface-hover); }
+.dataset-gen-toggle:disabled { opacity: 0.4; cursor: default; }
+.dataset-gen-toggle--open { border-color: var(--accent); color: var(--accent); }
+
+/* ── データセット生成パネル ──────────────────────────── */
+.dataset-gen-panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dataset-gen-panel__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.dataset-gen-panel__hint {
+  font-size: 0.72rem;
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+.dataset-gen-panel__sub {
+  font-size: 0.7rem;
+  color: var(--text-2);
+  font-weight: 400;
+  margin-left: 6px;
+}
+.dataset-gen-panel__slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.dataset-gen-panel__error {
+  font-size: 0.73rem;
+  color: #f87171;
+  margin: 0;
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: 4px;
+  padding: 4px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.dataset-gen-panel__result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-2);
+  background: rgba(74, 222, 128, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.dataset-gen-panel__result-ok {
+  color: #4ade80;
+  font-weight: 600;
+}
+.dataset-gen-panel__result strong {
+  color: var(--text);
+}
+
+/* ── training-config 区切り線 ─────────────────────────── */
+.training-config__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
 /* ── BoundingBox Editor ───────────────────────────── */
 .bbox-editor {
   position: absolute;

@@ -9,6 +9,7 @@ import type {
   BoundingBox,
   InferenceMode,
   ModelConfig,
+  DatasetInfo,
 } from '../types';
 
 // ─── イベントリスナー管理 (ストア外で保持) ───────────────────
@@ -57,6 +58,8 @@ interface StoreState {
   isSaving: boolean;
   isTraining: boolean;
   trainingLogs: string[];
+  isGeneratingDataset: boolean;
+  lastDatasetInfo: DatasetInfo | null;
 
   // ── モデル設定 ────────────────────────────────────────────
   faceScriptPath: string;
@@ -91,6 +94,9 @@ interface StoreState {
   appendTrainingLog: (log: string) => void;
   clearTrainingLogs: () => void;
 
+  // ── データセット生成 ──────────────────────────────────────
+  generateDataset: (sourceDir: string, outputDir: string, valRatio: number) => Promise<DatasetInfo>;
+
   // ── モデル設定 ────────────────────────────────────────────
   loadModelConfig: () => Promise<void>;
   saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
@@ -115,6 +121,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   isSaving: false,
   isTraining: false,
   trainingLogs: [],
+  isGeneratingDataset: false,
+  lastDatasetInfo: null,
   faceScriptPath: '',
   faceModelDir: '',
   objectModelPath: '',
@@ -345,6 +353,22 @@ export const useStore = create<StoreState>()((set, get) => ({
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  generateDataset: async (sourceDir, outputDir, valRatio) => {
+    set({ isGeneratingDataset: true, error: null });
+    try {
+      const info = await invoke<DatasetInfo>('generate_dataset', {
+        sourceDir,
+        outputDir,
+        valRatio,
+      });
+      set({ isGeneratingDataset: false, lastDatasetInfo: info });
+      return info;
+    } catch (e) {
+      set({ isGeneratingDataset: false, error: String(e) });
+      throw e;
     }
   },
 

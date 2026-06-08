@@ -1,4 +1,5 @@
 mod annotation;
+mod dataset;
 mod inference;
 mod training;
 
@@ -213,6 +214,17 @@ fn get_is_training() -> bool {
     training::is_training()
 }
 
+// ─── データセット生成コマンド ─────────────────────────────────
+
+#[tauri::command]
+fn generate_dataset(
+    source_dir: String,
+    output_dir: String,
+    val_ratio: f32,
+) -> Result<dataset::DatasetInfo, String> {
+    dataset::generate(&source_dir, &output_dir, val_ratio)
+}
+
 // ─── 推論コマンド ─────────────────────────────────────────────
 
 #[tauri::command]
@@ -254,6 +266,7 @@ pub fn run() {
             detect_faces_and_age,
             save_model_config,
             load_model_config,
+            generate_dataset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,13 @@ export interface BoundingBox {
 
 export type InferenceMode = 'none' | 'object' | 'face';
 
+export interface DatasetInfo {
+  yaml_path: string;
+  train_count: number;
+  val_count: number;
+  class_names: string[];
+}
+
 export interface ModelConfig {
   face_script_path: string;
   face_model_dir: string;
