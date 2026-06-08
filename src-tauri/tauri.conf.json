@@ -29,6 +29,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../scripts/detect_faces.py": "scripts/detect_faces.py",
+      "../scripts/train.py": "scripts/train.py"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

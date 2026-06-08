@@ -10,6 +10,7 @@ import type {
   InferenceMode,
   ModelConfig,
   DatasetInfo,
+  BundledScripts,
 } from '../types';
 
 // ─── イベントリスナー管理 (ストア外で保持) ───────────────────
@@ -67,6 +68,10 @@ interface StoreState {
   objectModelPath: string;
   objectClassNamesPath: string;
 
+  // ── バンドル済みスクリプト（インストール時同梱）────────────
+  bundledDetectFacesPy: string;
+  bundledTrainPy: string;
+
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: () => Promise<void>;
   selectFile: (index: number) => void;
@@ -101,6 +106,7 @@ interface StoreState {
   loadModelConfig: () => Promise<void>;
   saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
   saveObjectModelConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
+  loadBundledScripts: () => Promise<void>;
 }
 
 // ─── ストア ───────────────────────────────────────────────────
@@ -127,6 +133,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   faceModelDir: '',
   objectModelPath: '',
   objectClassNamesPath: '',
+  bundledDetectFacesPy: '',
+  bundledTrainPy: '',
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -353,6 +361,20 @@ export const useStore = create<StoreState>()((set, get) => ({
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  loadBundledScripts: async () => {
+    try {
+      const scripts = await invoke<BundledScripts>('get_bundled_scripts');
+      set({ bundledDetectFacesPy: scripts.detect_faces_py, bundledTrainPy: scripts.train_py });
+      // 未設定の場合はバンドル済みパスで自動補完
+      const { faceScriptPath } = get();
+      if (!faceScriptPath) {
+        set({ faceScriptPath: scripts.detect_faces_py });
+      }
+    } catch {
+      // 開発モードではリソースディレクトリが存在しないため無視
     }
   },
 

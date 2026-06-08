@@ -13,6 +13,7 @@ function App() {
 
   useEffect(() => {
     store.loadModelConfig();
+    store.loadBundledScripts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

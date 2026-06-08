@@ -292,9 +292,14 @@ function DatasetGenPanel({
 // ─── 学習セクション ────────────────────────────────────────────
 
 function TrainingSection() {
-  const { isTraining, trainingLogs, startTraining } = useStore();
+  const { isTraining, trainingLogs, startTraining, bundledTrainPy } = useStore();
   const [scriptPath, setScriptPath] = useState('');
   const [datasetPath, setDatasetPath] = useState('');
+
+  // バンドル済み train.py が取得できたらデフォルト入力
+  useEffect(() => {
+    if (bundledTrainPy && !scriptPath) setScriptPath(bundledTrainPy);
+  }, [bundledTrainPy]);
   const [extraArgs, setExtraArgs] = useState('');
   const [open_, setOpen] = useState(false);
   const [showGenPanel, setShowGenPanel] = useState(false);

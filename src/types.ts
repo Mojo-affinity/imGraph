@@ -29,6 +29,11 @@ export interface BoundingBox {
 
 export type InferenceMode = 'none' | 'object' | 'face';
 
+export interface BundledScripts {
+  detect_faces_py: string;
+  train_py: string;
+}
+
 export interface DatasetInfo {
   yaml_path: string;
   train_count: number;

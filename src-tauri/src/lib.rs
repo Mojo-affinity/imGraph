@@ -7,8 +7,36 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use walkdir::WalkDir;
+
+// ─── バンドル済みスクリプトパス ───────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+struct BundledScripts {
+    detect_faces_py: String,
+    train_py: String,
+}
+
+#[tauri::command]
+fn get_bundled_scripts(app: tauri::AppHandle) -> Result<BundledScripts, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("リソースディレクトリが取得できません: {}", e))?;
+    Ok(BundledScripts {
+        detect_faces_py: resource_dir
+            .join("scripts")
+            .join("detect_faces.py")
+            .to_string_lossy()
+            .to_string(),
+        train_py: resource_dir
+            .join("scripts")
+            .join("train.py")
+            .to_string_lossy()
+            .to_string(),
+    })
+}
 
 // ─── モデル設定 ───────────────────────────────────────────────
 
@@ -267,6 +295,7 @@ pub fn run() {
             save_model_config,
             load_model_config,
             generate_dataset,
+            get_bundled_scripts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
