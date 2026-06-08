@@ -1,3 +1,4 @@
+mod annotation;
 mod inference;
 
 use serde::{Deserialize, Serialize};
@@ -132,6 +133,26 @@ fn save_metadata(
     Ok(())
 }
 
+// ─── アノテーションコマンド ───────────────────────────────────
+
+#[tauri::command]
+async fn save_annotation(
+    image_path: String,
+    boxes: Vec<inference::BoundingBox>,
+) -> Result<(), String> {
+    annotation::save_annotation(&image_path, &boxes)
+}
+
+#[tauri::command]
+async fn load_annotation(image_path: String) -> Result<Vec<inference::BoundingBox>, String> {
+    annotation::load_annotation(&image_path)
+}
+
+#[tauri::command]
+async fn load_classes(dir_path: String) -> Result<Vec<String>, String> {
+    annotation::load_classes(&dir_path)
+}
+
 // ─── 推論コマンド ─────────────────────────────────────────────
 
 #[tauri::command]
@@ -156,6 +177,9 @@ pub fn run() {
             scan_directory,
             load_metadata,
             save_metadata,
+            save_annotation,
+            load_annotation,
+            load_classes,
             detect_objects,
             detect_faces_and_age,
         ])

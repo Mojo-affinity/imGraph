@@ -27,7 +27,11 @@ function App() {
         currentDir={store.currentDir}
         fileCount={store.files.length}
         isScanning={store.isScanning}
+        selectedFile={store.selectedFile}
+        boundingBoxCount={store.boundingBoxes.length}
+        isSaving={store.isSaving}
         onOpenDirectory={store.openDirectory}
+        onSaveAnnotation={store.saveAnnotation}
       />
       {store.error && (
         <div className="error-banner">{store.error}</div>

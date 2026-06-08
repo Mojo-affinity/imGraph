@@ -65,6 +65,39 @@
   background: var(--accent-hover);
 }
 
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__save-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toolbar__save-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.toolbar__save-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.toolbar__save-btn--saved {
+  border-color: #2ecc71;
+  color: #2ecc71;
+}
+
 .toolbar__info {
   display: flex;
   align-items: center;

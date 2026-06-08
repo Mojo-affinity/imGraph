@@ -17,6 +17,25 @@ const stopListeners = () => {
   _unlistenFns = [];
 };
 
+// ─── ファイル選択後にアノテーションをロードするヘルパー ────────
+async function loadAnnotationForFile(
+  file: MediaFile | undefined,
+  targetIndex: number,
+  getIndex: () => number | null,
+  setBoxes: (boxes: BoundingBox[]) => void
+) {
+  if (!file || file.media_type !== 'image') return;
+  try {
+    const boxes = await invoke<BoundingBox[]>('load_annotation', { imagePath: file.path });
+    // 非同期中にファイルが変わっていたら適用しない
+    if (getIndex() === targetIndex) {
+      setBoxes(boxes);
+    }
+  } catch {
+    // .txt が存在しない = アノテーションなし（正常）
+  }
+}
+
 // ─── State / Actions 型定義 ───────────────────────────────────
 
 interface StoreState {
@@ -30,8 +49,10 @@ interface StoreState {
 
   // ── ML / アノテーション ───────────────────────────────────
   boundingBoxes: BoundingBox[];
+  classes: string[];
   inferenceMode: InferenceMode;
   isInferring: boolean;
+  isSaving: boolean;
   isTraining: boolean;
   trainingLogs: string[];
 
@@ -42,7 +63,8 @@ interface StoreState {
   navigateNext: () => void;
   updateMetadata: (filePath: string, update: Partial<MediaMetadata>) => Promise<void>;
 
-  // ── BoundingBox 操作 ──────────────────────────────────────
+  // ── アノテーション操作 ────────────────────────────────────
+  saveAnnotation: () => Promise<void>;
   setBoundingBoxes: (boxes: BoundingBox[]) => void;
   addBoundingBox: (box: BoundingBox) => void;
   updateBoundingBox: (id: string, updates: Partial<BoundingBox>) => void;
@@ -71,8 +93,10 @@ export const useStore = create<StoreState>()((set, get) => ({
   isScanning: false,
   error: null,
   boundingBoxes: [],
+  classes: [],
   inferenceMode: 'none',
   isInferring: false,
+  isSaving: false,
   isTraining: false,
   trainingLogs: [],
 
@@ -88,6 +112,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         files: [],
         selectedIndex: null,
         metadata: {},
+        classes: [],
         isScanning: true,
         error: null,
         boundingBoxes: [],
@@ -107,8 +132,11 @@ export const useStore = create<StoreState>()((set, get) => ({
           isScanning: false,
         }));
         try {
-          const meta = await invoke<MetadataMap>('load_metadata', { dirPath: selected });
-          set({ metadata: meta });
+          const [meta, classes] = await Promise.all([
+            invoke<MetadataMap>('load_metadata', { dirPath: selected }),
+            invoke<string[]>('load_classes', { dirPath: selected }),
+          ]);
+          set({ metadata: meta, classes });
         } catch (e) {
           set({ error: String(e) });
         }
@@ -122,26 +150,42 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
-  selectFile: (index) =>
-    set({ selectedIndex: index, boundingBoxes: [] }),
+  selectFile: (index) => {
+    const { files } = get();
+    set({ selectedIndex: index, boundingBoxes: [] });
+    loadAnnotationForFile(
+      files[index],
+      index,
+      () => get().selectedIndex,
+      (boxes) => set({ boundingBoxes: boxes })
+    );
+  },
 
-  navigatePrev: () =>
-    set((s) => ({
-      selectedIndex:
-        s.selectedIndex !== null && s.selectedIndex > 0
-          ? s.selectedIndex - 1
-          : s.selectedIndex,
-      boundingBoxes: [],
-    })),
+  navigatePrev: () => {
+    const { selectedIndex, files } = get();
+    if (selectedIndex === null || selectedIndex <= 0) return;
+    const next = selectedIndex - 1;
+    set({ selectedIndex: next, boundingBoxes: [] });
+    loadAnnotationForFile(
+      files[next],
+      next,
+      () => get().selectedIndex,
+      (boxes) => set({ boundingBoxes: boxes })
+    );
+  },
 
-  navigateNext: () =>
-    set((s) => ({
-      selectedIndex:
-        s.selectedIndex !== null && s.selectedIndex < s.files.length - 1
-          ? s.selectedIndex + 1
-          : s.selectedIndex,
-      boundingBoxes: [],
-    })),
+  navigateNext: () => {
+    const { selectedIndex, files } = get();
+    if (selectedIndex === null || selectedIndex >= files.length - 1) return;
+    const next = selectedIndex + 1;
+    set({ selectedIndex: next, boundingBoxes: [] });
+    loadAnnotationForFile(
+      files[next],
+      next,
+      () => get().selectedIndex,
+      (boxes) => set({ boundingBoxes: boxes })
+    );
+  },
 
   updateMetadata: async (filePath, update) => {
     const { currentDir, metadata } = get();
@@ -159,24 +203,34 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
-  // ── BoundingBox 操作 ──────────────────────────────────────
-  setBoundingBoxes: (boxes) => set({ boundingBoxes: boxes }),
+  // ── アノテーション操作 ────────────────────────────────────
+  saveAnnotation: async () => {
+    const { selectedIndex, files, boundingBoxes } = get();
+    if (selectedIndex === null) return;
+    const file = files[selectedIndex];
+    if (!file || file.media_type !== 'image') return;
 
+    set({ isSaving: true, error: null });
+    try {
+      await invoke('save_annotation', { imagePath: file.path, boxes: boundingBoxes });
+      // classes.txt が更新された可能性があるので再ロード
+      const dir = file.path.substring(0, Math.max(file.path.lastIndexOf('/'), file.path.lastIndexOf('\\')));
+      const classes = await invoke<string[]>('load_classes', { dirPath: dir });
+      set({ isSaving: false, classes });
+    } catch (e) {
+      set({ isSaving: false, error: String(e) });
+    }
+  },
+
+  setBoundingBoxes: (boxes) => set({ boundingBoxes: boxes }),
   addBoundingBox: (box) =>
     set((s) => ({ boundingBoxes: [...s.boundingBoxes, box] })),
-
   updateBoundingBox: (id, updates) =>
     set((s) => ({
-      boundingBoxes: s.boundingBoxes.map((b) =>
-        b.id === id ? { ...b, ...updates } : b
-      ),
+      boundingBoxes: s.boundingBoxes.map((b) => (b.id === id ? { ...b, ...updates } : b)),
     })),
-
   removeBoundingBox: (id) =>
-    set((s) => ({
-      boundingBoxes: s.boundingBoxes.filter((b) => b.id !== id),
-    })),
-
+    set((s) => ({ boundingBoxes: s.boundingBoxes.filter((b) => b.id !== id) })),
   clearBoundingBoxes: () => set({ boundingBoxes: [] }),
 
   // ── 推論 ──────────────────────────────────────────────────
