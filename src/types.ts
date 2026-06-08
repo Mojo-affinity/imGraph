@@ -32,4 +32,6 @@ export type InferenceMode = 'none' | 'object' | 'face';
 export interface ModelConfig {
   face_script_path: string;
   face_model_dir: string;
+  object_model_path: string;
+  object_class_names_path: string;
 }

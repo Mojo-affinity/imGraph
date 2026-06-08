@@ -61,6 +61,8 @@ interface StoreState {
   // ── モデル設定 ────────────────────────────────────────────
   faceScriptPath: string;
   faceModelDir: string;
+  objectModelPath: string;
+  objectClassNamesPath: string;
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: () => Promise<void>;
@@ -92,6 +94,7 @@ interface StoreState {
   // ── モデル設定 ────────────────────────────────────────────
   loadModelConfig: () => Promise<void>;
   saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
+  saveObjectModelConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
 }
 
 // ─── ストア ───────────────────────────────────────────────────
@@ -114,6 +117,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   trainingLogs: [],
   faceScriptPath: '',
   faceModelDir: '',
+  objectModelPath: '',
+  objectClassNamesPath: '',
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -266,7 +271,12 @@ export const useStore = create<StoreState>()((set, get) => ({
           modelDir: faceModelDir,
         });
       } else {
-        boxes = await invoke<BoundingBox[]>('detect_objects', { imagePath });
+        const { objectModelPath, objectClassNamesPath } = get();
+        boxes = await invoke<BoundingBox[]>('detect_objects', {
+          imagePath,
+          modelPath: objectModelPath,
+          classNamesPath: objectClassNamesPath,
+        });
       }
       set({ boundingBoxes: boxes, isInferring: false });
     } catch (e) {
@@ -310,18 +320,46 @@ export const useStore = create<StoreState>()((set, get) => ({
   loadModelConfig: async () => {
     try {
       const config = await invoke<ModelConfig>('load_model_config');
-      set({ faceScriptPath: config.face_script_path, faceModelDir: config.face_model_dir });
+      set({
+        faceScriptPath: config.face_script_path,
+        faceModelDir: config.face_model_dir,
+        objectModelPath: config.object_model_path,
+        objectClassNamesPath: config.object_class_names_path,
+      });
     } catch {
       // ファイル未作成時は初期値のまま
     }
   },
 
   saveModelConfig: async (scriptPath, modelDir) => {
+    const { objectModelPath, objectClassNamesPath } = get();
     try {
       await invoke('save_model_config', {
-        config: { face_script_path: scriptPath, face_model_dir: modelDir },
+        config: {
+          face_script_path: scriptPath,
+          face_model_dir: modelDir,
+          object_model_path: objectModelPath,
+          object_class_names_path: objectClassNamesPath,
+        },
       });
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  saveObjectModelConfig: async (modelPath, classNamesPath) => {
+    const { faceScriptPath, faceModelDir } = get();
+    try {
+      await invoke('save_model_config', {
+        config: {
+          face_script_path: faceScriptPath,
+          face_model_dir: faceModelDir,
+          object_model_path: modelPath,
+          object_class_names_path: classNamesPath,
+        },
+      });
+      set({ objectModelPath: modelPath, objectClassNamesPath: classNamesPath });
     } catch (e) {
       set({ error: String(e) });
     }

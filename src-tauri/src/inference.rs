@@ -24,37 +24,230 @@ pub struct BoundingBox {
     pub age: Option<u32>,
 }
 
-// ─── 物体検出 ─────────────────────────────────────────────────
-//
-// TODO: ort (ONNX Runtime) による実推論に置き換える。
-//   推奨モデル: YOLOv8n (ONNX) — https://github.com/ultralytics/ultralytics
-//
-pub async fn run_object_detection(image_path: &str) -> Result<Vec<BoundingBox>, String> {
+// ─── 物体検出（YOLOv8 ONNX + ort） ───────────────────────────────
+pub async fn run_object_detection(
+    image_path: &str,
+    model_path: &str,
+    class_names_path: &str,
+) -> Result<Vec<BoundingBox>, String> {
     validate_image_path(image_path)?;
 
-    Ok(vec![
-        BoundingBox {
-            id: next_id(),
-            x: 0.05, y: 0.10, width: 0.30, height: 0.55,
-            label: "person".to_string(),
-            confidence: 0.91,
-            age: None,
-        },
-        BoundingBox {
-            id: next_id(),
-            x: 0.55, y: 0.30, width: 0.35, height: 0.28,
-            label: "car".to_string(),
-            confidence: 0.76,
-            age: None,
-        },
-    ])
+    if model_path.is_empty() {
+        return Err(
+            "物体検出モデルが設定されていません。\
+             Toolbar の ⚙ から ONNX モデルパスを設定してください。"
+                .to_string(),
+        );
+    }
+    if !Path::new(model_path).exists() {
+        return Err(format!("モデルが見つかりません: {}", model_path));
+    }
+
+    let image_path = image_path.to_string();
+    let model_path = model_path.to_string();
+    let class_names_path = class_names_path.to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        yolo_detect(&image_path, &model_path, &class_names_path)
+    })
+    .await
+    .map_err(|e| format!("タスク実行エラー: {}", e))?
 }
 
-// ─── 顔検出 + 年齢推定（Python subprocess） ──────────────────
-//
-// scripts/detect_faces.py を python3 で呼び出し、
-// stdout の JSON を Vec<BoundingBox> にパースして返す。
-//
+fn yolo_detect(
+    image_path: &str,
+    model_path: &str,
+    class_names_path: &str,
+) -> Result<Vec<BoundingBox>, String> {
+    use ndarray::Array4;
+    use ort::{session::Session, value::Tensor};
+
+    let class_names = load_class_names(class_names_path);
+
+    // 画像読み込み
+    let img =
+        image::open(image_path).map_err(|e| format!("画像読み込みエラー: {}", e))?;
+    let orig_w = img.width() as f32;
+    let orig_h = img.height() as f32;
+    let img_rgb = img.into_rgb8();
+
+    // letterbox リサイズ（640×640 に収める）
+    const SZ: u32 = 640;
+    let scale = (SZ as f32 / orig_w).min(SZ as f32 / orig_h);
+    let new_w = (orig_w * scale).round() as u32;
+    let new_h = (orig_h * scale).round() as u32;
+    let pad_x = ((SZ - new_w) / 2) as f32;
+    let pad_y = ((SZ - new_h) / 2) as f32;
+
+    let resized = image::imageops::resize(
+        &img_rgb,
+        new_w,
+        new_h,
+        image::imageops::FilterType::Triangle, // Bilinear 相当
+    );
+
+    // [1, 3, 640, 640] float32 テンソル（RGB, 0.0-1.0, CHW）
+    let mut input = Array4::<f32>::zeros((1, 3, SZ as usize, SZ as usize));
+    for y in 0..new_h {
+        for x in 0..new_w {
+            let p = resized.get_pixel(x, y);
+            let px = (x as f32 + pad_x) as usize;
+            let py = (y as f32 + pad_y) as usize;
+            input[[0, 0, py, px]] = p[0] as f32 / 255.0;
+            input[[0, 1, py, px]] = p[1] as f32 / 255.0;
+            input[[0, 2, py, px]] = p[2] as f32 / 255.0;
+        }
+    }
+
+    // ONNX セッション構築
+    let mut session = Session::builder()
+        .map_err(|e| format!("ORT 初期化エラー: {}", e))?
+        .commit_from_file(model_path)
+        .map_err(|e| format!("モデル読み込みエラー: {}", e))?;
+
+    // Tensor 構築と推論実行
+    let tensor = Tensor::<f32>::from_array(input)
+        .map_err(|e| format!("テンソル構築エラー: {}", e))?;
+
+    let outputs = session
+        .run(ort::inputs![tensor])
+        .map_err(|e| format!("推論エラー: {}", e))?;
+
+    // 出力テンソルを ndarray として取得: shape = [1, 4+num_classes, 8400]
+    let output = outputs[0]
+        .try_extract_array::<f32>()
+        .map_err(|e| format!("出力取得エラー: {}", e))?;
+
+    let shape = output.shape();
+    if shape.len() != 3 || shape[0] != 1 || shape[2] < 1 {
+        return Err(format!(
+            "予期しない出力形状: {:?}（YOLOv8 ONNX モデルか確認してください）",
+            shape
+        ));
+    }
+    let num_outputs = shape[1];
+    let num_anchors = shape[2];
+    if num_outputs < 5 {
+        return Err(format!(
+            "出力チャンネル数 {} が不正です（4 + クラス数 ≥ 5 が必要）",
+            num_outputs
+        ));
+    }
+    let num_classes = num_outputs - 4;
+
+    const CONF_THRESHOLD: f32 = 0.25;
+    const IOU_THRESHOLD: f32 = 0.45;
+
+    // (cx, cy, w, h, class_id, confidence) — 入力画像（640×640）のピクセル座標
+    let mut dets: Vec<(f32, f32, f32, f32, usize, f32)> = Vec::new();
+
+    for i in 0..num_anchors {
+        let cx = output[[0, 0, i]];
+        let cy = output[[0, 1, i]];
+        let w  = output[[0, 2, i]];
+        let h  = output[[0, 3, i]];
+
+        let mut best_conf = 0.0f32;
+        let mut best_cls = 0usize;
+        for c in 0..num_classes {
+            let conf = output[[0, 4 + c, i]];
+            if conf > best_conf {
+                best_conf = conf;
+                best_cls = c;
+            }
+        }
+
+        if best_conf >= CONF_THRESHOLD {
+            dets.push((cx, cy, w, h, best_cls, best_conf));
+        }
+    }
+
+    // クラス別 Greedy NMS
+    let class_ids: std::collections::HashSet<usize> = dets.iter().map(|d| d.4).collect();
+    let mut result: Vec<BoundingBox> = Vec::new();
+
+    for cid in class_ids {
+        let mut cls_dets: Vec<_> = dets.iter().filter(|d| d.4 == cid).cloned().collect();
+        cls_dets.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut keep = vec![true; cls_dets.len()];
+        for i in 0..cls_dets.len() {
+            if !keep[i] {
+                continue;
+            }
+            for j in (i + 1)..cls_dets.len() {
+                if !keep[j] {
+                    continue;
+                }
+                let (a, b) = (&cls_dets[i], &cls_dets[j]);
+                if iou(a.0, a.1, a.2, a.3, b.0, b.1, b.2, b.3) > IOU_THRESHOLD {
+                    keep[j] = false;
+                }
+            }
+        }
+
+        for (det, k) in cls_dets.iter().zip(keep) {
+            if !k {
+                continue;
+            }
+            let (cx, cy, w, h, class_id, conf) = *det;
+
+            // letterbox ピクセル座標 → 元画像正規化座標
+            let x1 = (cx - w / 2.0 - pad_x) / scale;
+            let y1 = (cy - h / 2.0 - pad_y) / scale;
+            let bw = w / scale;
+            let bh = h / scale;
+
+            let nx = (x1 / orig_w).clamp(0.0, 1.0);
+            let ny = (y1 / orig_h).clamp(0.0, 1.0);
+            let nw = (bw / orig_w).clamp(0.0, 1.0 - nx);
+            let nh = (bh / orig_h).clamp(0.0, 1.0 - ny);
+
+            let label = class_names
+                .get(class_id)
+                .cloned()
+                .unwrap_or_else(|| format!("class_{}", class_id));
+
+            result.push(BoundingBox {
+                id: next_id(),
+                x: nx as f64,
+                y: ny as f64,
+                width: nw as f64,
+                height: nh as f64,
+                label,
+                confidence: conf as f64,
+                age: None,
+            });
+        }
+    }
+
+    Ok(result)
+}
+
+// CX/CY/W/H 形式同士の IoU（中心座標 + 幅高さ）
+fn iou(cx1: f32, cy1: f32, w1: f32, h1: f32, cx2: f32, cy2: f32, w2: f32, h2: f32) -> f32 {
+    let (x1, y1, x2, y2) = (cx1 - w1 / 2.0, cy1 - h1 / 2.0, cx1 + w1 / 2.0, cy1 + h1 / 2.0);
+    let (x3, y3, x4, y4) = (cx2 - w2 / 2.0, cy2 - h2 / 2.0, cx2 + w2 / 2.0, cy2 + h2 / 2.0);
+    let inter = (x2.min(x4) - x1.max(x3)).max(0.0) * (y2.min(y4) - y1.max(y3)).max(0.0);
+    let union = w1 * h1 + w2 * h2 - inter;
+    if union <= 0.0 { 0.0 } else { inter / union }
+}
+
+fn load_class_names(path: &str) -> Vec<String> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => content
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+// ─── 顔検出 + 年齢推定（Python subprocess） ──────────────────────
 pub async fn run_face_detection(
     image_path: &str,
     script_path: &str,
@@ -77,7 +270,6 @@ pub async fn run_face_detection(
     let script_path = script_path.to_string();
     let model_dir = model_dir.to_string();
 
-    // ブロッキング処理を spawn_blocking で非同期化
     let result = tauri::async_runtime::spawn_blocking(move || {
         let python = if cfg!(target_os = "windows") { "python" } else { "python3" };
         let mut cmd = std::process::Command::new(python);
@@ -116,7 +308,6 @@ pub async fn run_face_detection(
     let mut boxes: Vec<BoundingBox> =
         serde_json::from_str(json_str).map_err(|e| format!("JSON パースエラー: {}", e))?;
 
-    // スクリプト側の仮 ID をアトミックカウンタ由来の一意 ID に差し替え
     for b in &mut boxes {
         b.id = next_id();
     }
@@ -124,7 +315,7 @@ pub async fn run_face_detection(
     Ok(boxes)
 }
 
-// ─── 共通バリデーション ───────────────────────────────────────
+// ─── 共通バリデーション ───────────────────────────────────────────
 
 fn validate_image_path(image_path: &str) -> Result<(), String> {
     let path = Path::new(image_path);

@@ -17,6 +17,10 @@ struct ModelConfig {
     face_script_path: String,
     #[serde(default)]
     face_model_dir: String,
+    #[serde(default)]
+    object_model_path: String,
+    #[serde(default)]
+    object_class_names_path: String,
 }
 
 fn model_config_path() -> PathBuf {
@@ -212,8 +216,12 @@ fn get_is_training() -> bool {
 // ─── 推論コマンド ─────────────────────────────────────────────
 
 #[tauri::command]
-async fn detect_objects(image_path: String) -> Result<Vec<inference::BoundingBox>, String> {
-    inference::run_object_detection(&image_path).await
+async fn detect_objects(
+    image_path: String,
+    model_path: String,
+    class_names_path: String,
+) -> Result<Vec<inference::BoundingBox>, String> {
+    inference::run_object_detection(&image_path, &model_path, &class_names_path).await
 }
 
 #[tauri::command]

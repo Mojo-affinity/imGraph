@@ -74,15 +74,18 @@ export function Toolbar({
       {/* 推論ボタングループ */}
       {isImage && (
         <div className="toolbar__inference-group">
-          <button
-            className="toolbar__inference-btn"
-            onClick={onDetectObjects}
-            disabled={!canInfer}
-            title="学習済みモデルで物体検出"
-          >
-            <BoxIcon />
-            物体検出
-          </button>
+          <div className="toolbar__face-group">
+            <button
+              className="toolbar__inference-btn"
+              onClick={onDetectObjects}
+              disabled={!canInfer}
+              title="学習済みモデルで物体検出"
+            >
+              <BoxIcon />
+              物体検出
+            </button>
+            <ObjectModelSettings />
+          </div>
 
           {/* 顔検出 + 設定ギア */}
           <div className="toolbar__face-group">
@@ -118,6 +121,111 @@ export function Toolbar({
             <><SaveIcon />学習データとして保存</>
           )}
         </button>
+      )}
+    </div>
+  );
+}
+
+// ─── 物体検出モデル設定パネル ───────────────────────────────────
+
+function ObjectModelSettings() {
+  const { objectModelPath, objectClassNamesPath, saveObjectModelConfig } = useStore();
+  const [isOpen, setOpen] = useState(false);
+  const [modelPath, setModelPath] = useState(objectModelPath);
+  const [classNamesPath, setClassNamesPath] = useState(objectClassNamesPath);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setModelPath(objectModelPath); }, [objectModelPath]);
+  useEffect(() => { setClassNamesPath(objectClassNamesPath); }, [objectClassNamesPath]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  const browseModel = async () => {
+    const path = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'ONNX Model', extensions: ['onnx'] }],
+    });
+    if (typeof path === 'string') setModelPath(path);
+  };
+
+  const browseClassNames = async () => {
+    const path = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Text File', extensions: ['txt'] }],
+    });
+    if (typeof path === 'string') setClassNamesPath(path);
+  };
+
+  const handleSave = async () => {
+    await saveObjectModelConfig(modelPath, classNamesPath);
+    setOpen(false);
+  };
+
+  return (
+    <div className="face-model-settings" ref={panelRef}>
+      <button
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        title="物体検出モデル設定"
+      >
+        <GearIcon />
+      </button>
+
+      {isOpen && (
+        <div className="face-model-panel">
+          <p className="face-model-panel__title">物体検出設定</p>
+
+          <label className="face-model-panel__label">
+            ONNX モデル
+            <span className="face-model-panel__hint">（YOLOv8 ONNX）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={modelPath}
+              onChange={e => setModelPath(e.target.value)}
+              placeholder="best.onnx のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseModel}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <label className="face-model-panel__label">
+            クラス名ファイル
+            <span className="face-model-panel__hint">（空 = class_0, class_1…）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={classNamesPath}
+              onChange={e => setClassNamesPath(e.target.value)}
+              placeholder="classes.txt のパス（省略可）"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseClassNames}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <div className="face-model-panel__actions">
+            <button className="face-model-panel__save" onClick={handleSave}>
+              保存
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
