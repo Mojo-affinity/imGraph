@@ -57,6 +57,12 @@ function App() {
     }
   };
 
+  const handleDetectNudenet = () => {
+    if (store.selectedFile?.media_type === 'image') {
+      store.runInference(store.selectedFile.path, 'nudenet');
+    }
+  };
+
   return (
     <div className="app">
       <Toolbar
@@ -71,6 +77,7 @@ function App() {
         onSaveAnnotation={store.saveAnnotation}
         onDetectObjects={handleDetectObjects}
         onDetectFaces={handleDetectFaces}
+        onDetectNudenet={handleDetectNudenet}
       />
       {store.error && (
         <div className="error-banner">{store.error}</div>

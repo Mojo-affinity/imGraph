@@ -24,6 +24,25 @@ pub struct BoundingBox {
     pub age: Option<u32>,
 }
 
+// NudeNet v3 組み込みクラス名（class_names_path が空の場合に使用）
+pub const NUDENET_CLASSES: &[&str] = &[
+    "FEMALE_GENITALIA_COVERED",
+    "FEMALE_FACE",
+    "BUTTOCKS_EXPOSED",
+    "FEMALE_BREAST_EXPOSED",
+    "FEMALE_GENITALIA_EXPOSED",
+    "MALE_BREAST_EXPOSED",
+    "ANUS_EXPOSED",
+    "FEET_EXPOSED",
+    "BELLY_COVERED",
+    "FEET_COVERED",
+    "ARMPITS_COVERED",
+    "ARMPITS_EXPOSED",
+    "FACE_MALE",
+    "BELLY_EXPOSED",
+    "MALE_GENITALIA_EXPOSED",
+];
+
 // ─── 物体検出（YOLOv8 ONNX + ort） ───────────────────────────────
 pub async fn run_object_detection(
     image_path: &str,
@@ -48,7 +67,36 @@ pub async fn run_object_detection(
     let class_names_path = class_names_path.to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        yolo_detect(&image_path, &model_path, &class_names_path)
+        yolo_detect(&image_path, &model_path, &class_names_path, 0.25)
+    })
+    .await
+    .map_err(|e| format!("タスク実行エラー: {}", e))?
+}
+
+// ─── 部位検出（NudeNet v3 ONNX） ──────────────────────────────────
+pub async fn run_nudenet_detection(
+    image_path: &str,
+    model_path: &str,
+    conf_threshold: f32,
+) -> Result<Vec<BoundingBox>, String> {
+    validate_image_path(image_path)?;
+
+    if model_path.is_empty() {
+        return Err(
+            "NudeNet モデルが設定されていません。\
+             Toolbar の ⚙ から 640m.onnx のパスを設定してください。"
+                .to_string(),
+        );
+    }
+    if !Path::new(model_path).exists() {
+        return Err(format!("モデルが見つかりません: {}", model_path));
+    }
+
+    let image_path = image_path.to_string();
+    let model_path = model_path.to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        yolo_detect_nudenet(&image_path, &model_path, conf_threshold)
     })
     .await
     .map_err(|e| format!("タスク実行エラー: {}", e))?
@@ -58,6 +106,7 @@ fn yolo_detect(
     image_path: &str,
     model_path: &str,
     class_names_path: &str,
+    conf_threshold: f32,
 ) -> Result<Vec<BoundingBox>, String> {
     use ndarray::Array4;
     use ort::{session::Session, value::Tensor};
@@ -135,7 +184,6 @@ fn yolo_detect(
     }
     let num_classes = num_outputs - 4;
 
-    const CONF_THRESHOLD: f32 = 0.25;
     const IOU_THRESHOLD: f32 = 0.45;
 
     // (cx, cy, w, h, class_id, confidence) — 入力画像（640×640）のピクセル座標
@@ -157,7 +205,7 @@ fn yolo_detect(
             }
         }
 
-        if best_conf >= CONF_THRESHOLD {
+        if best_conf >= conf_threshold {
             dets.push((cx, cy, w, h, best_cls, best_conf));
         }
     }
@@ -245,6 +293,30 @@ fn load_class_names(path: &str) -> Vec<String> {
             .collect(),
         Err(_) => Vec::new(),
     }
+}
+
+// ─── NudeNet 専用検出（組み込みクラス名 + 可変閾値） ─────────────────
+fn yolo_detect_nudenet(
+    image_path: &str,
+    model_path: &str,
+    conf_threshold: f32,
+) -> Result<Vec<BoundingBox>, String> {
+    // クラス名ファイルは使わず組み込み定数を使用
+    let dummy_class_names_path = "";
+    let mut result = yolo_detect(image_path, model_path, dummy_class_names_path, conf_threshold)?;
+
+    // クラス名を組み込み定数で上書き（yolo_detect が class_N フォールバックを返す場合に対応）
+    for b in &mut result {
+        if b.label.starts_with("class_") {
+            if let Ok(idx) = b.label["class_".len()..].parse::<usize>() {
+                if let Some(name) = NUDENET_CLASSES.get(idx) {
+                    b.label = name.to_string();
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 // ─── 顔検出 + 年齢推定（Python subprocess） ──────────────────────

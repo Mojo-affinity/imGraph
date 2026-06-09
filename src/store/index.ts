@@ -70,6 +70,8 @@ interface StoreState {
   objectClassNamesPath: string;
   faceDetModelPath: string;
   faceGenderageModelPath: string;
+  nudenetModelPath: string;
+  nudenetConfThreshold: number;
 
   // ── バンドル済みスクリプト（インストール時同梱）────────────
   bundledDetectFacesPy: string;
@@ -118,6 +120,7 @@ interface StoreState {
   saveObjectModelConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
   loadBundledScripts: () => Promise<void>;
   saveFaceOnnxConfig: (detModelPath: string, genderageModelPath: string) => Promise<void>;
+  saveNudenetConfig: (modelPath: string, confThreshold: number) => Promise<void>;
 
   // ── UI モード ─────────────────────────────────────────────
   toggleAnnotationMode: () => void;
@@ -155,6 +158,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   objectClassNamesPath: '',
   faceDetModelPath: '',
   faceGenderageModelPath: '',
+  nudenetModelPath: '',
+  nudenetConfThreshold: 0.2,
   bundledDetectFacesPy: '',
   bundledTrainPy: '',
   annotationMode: true,
@@ -313,6 +318,13 @@ export const useStore = create<StoreState>()((set, get) => ({
           faceDetModelPath,
           faceGenderageModelPath,
         });
+      } else if (mode === 'nudenet') {
+        const { nudenetModelPath, nudenetConfThreshold } = get();
+        boxes = await invoke<BoundingBox[]>('detect_nudenet', {
+          imagePath,
+          modelPath: nudenetModelPath,
+          confThreshold: nudenetConfThreshold,
+        });
       } else {
         const { objectModelPath, objectClassNamesPath } = get();
         boxes = await invoke<BoundingBox[]>('detect_objects', {
@@ -370,6 +382,8 @@ export const useStore = create<StoreState>()((set, get) => ({
         objectClassNamesPath: config.object_class_names_path,
         faceDetModelPath: config.face_det_model_path,
         faceGenderageModelPath: config.face_genderage_model_path,
+        nudenetModelPath: config.nudenet_model_path,
+        nudenetConfThreshold: config.nudenet_conf_threshold ?? 0.2,
       });
     } catch {
       // ファイル未作成時は初期値のまま
@@ -377,7 +391,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveModelConfig: async (scriptPath, modelDir) => {
-    const { objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath } = get();
+    const { objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath, nudenetModelPath, nudenetConfThreshold } = get();
     try {
       await invoke('save_model_config', {
         config: {
@@ -387,6 +401,8 @@ export const useStore = create<StoreState>()((set, get) => ({
           object_class_names_path: objectClassNamesPath,
           face_det_model_path: faceDetModelPath,
           face_genderage_model_path: faceGenderageModelPath,
+          nudenet_model_path: nudenetModelPath,
+          nudenet_conf_threshold: nudenetConfThreshold,
         },
       });
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
@@ -441,7 +457,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   setShowLogWindow: (v) => set({ showLogWindow: v }),
 
   saveObjectModelConfig: async (modelPath, classNamesPath) => {
-    const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath } = get();
+    const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath, nudenetModelPath, nudenetConfThreshold } = get();
     try {
       await invoke('save_model_config', {
         config: {
@@ -451,6 +467,8 @@ export const useStore = create<StoreState>()((set, get) => ({
           object_class_names_path: classNamesPath,
           face_det_model_path: faceDetModelPath,
           face_genderage_model_path: faceGenderageModelPath,
+          nudenet_model_path: nudenetModelPath,
+          nudenet_conf_threshold: nudenetConfThreshold,
         },
       });
       set({ objectModelPath: modelPath, objectClassNamesPath: classNamesPath });
@@ -460,7 +478,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveFaceOnnxConfig: async (detModelPath, genderageModelPath) => {
-    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath } = get();
+    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath, nudenetModelPath, nudenetConfThreshold } = get();
     try {
       await invoke('save_model_config', {
         config: {
@@ -470,9 +488,32 @@ export const useStore = create<StoreState>()((set, get) => ({
           object_class_names_path: objectClassNamesPath,
           face_det_model_path: detModelPath,
           face_genderage_model_path: genderageModelPath,
+          nudenet_model_path: nudenetModelPath,
+          nudenet_conf_threshold: nudenetConfThreshold,
         },
       });
       set({ faceDetModelPath: detModelPath, faceGenderageModelPath: genderageModelPath });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  saveNudenetConfig: async (modelPath, confThreshold) => {
+    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath } = get();
+    try {
+      await invoke('save_model_config', {
+        config: {
+          face_script_path: faceScriptPath,
+          face_model_dir: faceModelDir,
+          object_model_path: objectModelPath,
+          object_class_names_path: objectClassNamesPath,
+          face_det_model_path: faceDetModelPath,
+          face_genderage_model_path: faceGenderageModelPath,
+          nudenet_model_path: modelPath,
+          nudenet_conf_threshold: confThreshold,
+        },
+      });
+      set({ nudenetModelPath: modelPath, nudenetConfThreshold: confThreshold });
     } catch (e) {
       set({ error: String(e) });
     }

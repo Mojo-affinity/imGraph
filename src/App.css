@@ -859,6 +859,12 @@
   accent-color: var(--accent);
   cursor: pointer;
 }
+.nudenet-conf-slider {
+  width: 100%;
+  accent-color: #f97316;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
 .dataset-gen-panel__error {
   font-size: 0.73rem;
   color: #f87171;

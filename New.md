@@ -173,13 +173,131 @@ Toolbar の顔検出ボタン横に ⚙ アイコンを追加。クリックで�
 
 | # | 内容 | 状態 |
 |---|------|------|
-| B-1 | `dataset.yaml` + `train/val/images/labels` ディレクトリ構造の自動生成 | 未実装 |
-| B-2 | 学習スクリプト（`train.py`）・データセットパスを UI から選択するダイアログ | 未実装（ハードコード前提） |
+| B-1 | `dataset.yaml` + `train/val/images/labels` ディレクトリ構造の自動生成 | **実装済み** (`dataset.rs`) |
+| B-2 | 学習スクリプト（`train.py`）・データセットパスを UI から選択するダイアログ | **実装済み** (`training.rs` + `Toolbar.tsx`) |
 
 ### C. UX 改善
 
 | # | 内容 | 状態 |
 |---|------|------|
-| C-1 | 画像のホイールズームとパン（現在は `object-fit:contain` 固定） | 未実装 |
-| C-2 | アノテーションモード ON/OFF トグル（常時描画モードで誤操作が起きやすい） | 未実装 |
-| C-3 | クラス一覧から選べるラベル入力補完（現状はフリーテキスト） | 未実装 |
+| C-1 | 画像のホイールズームとパン | **実装済み** (`MediaViewer.tsx`) |
+| C-2 | アノテーションモード ON/OFF トグル | **実装済み** (`Toolbar.tsx` + `BoundingBoxEditor.tsx`) |
+| C-3 | クラス一覧から選べるラベル入力補完（`datalist`） | **実装済み** (`BoundingBoxEditor.tsx`) |
+
+
+## 機能追加・改良
+
+### NSFW画像判定（実装予定）
+
+#### 方針
+- **推論方式**: `ort` クレートによる Rust ネイティブ ONNX 推論（既存の `face_inference.rs` / `inference.rs` と同パターン）
+- **対応モデル形状**:
+  - Binary: 入力 `[1,3,224,224]` → 出力 `[1,2]`（softmax済み or logits）。index 0 = safe, index 1 = nsfw
+  - Single-output: 出力 `[1,1]`（sigmoid）→ そのまま NSFW スコアとして使用
+  - Multi-class: クラス名ファイル（`.txt`）を別途指定。`nsfw`/`porn`/`hentai`/`sexy` 等のキーワードを含むクラスのスコアを合算
+- **前処理**: リサイズ 224×224、ImageNet 正規化（mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]）、NCHW float32
+- **セッションキャッシュ**: `OnceLock<Mutex<Option<SessionCache>>>` で保持（`face_inference.rs` と同方式）
+- **閾値**: 0.5（Rust側固定）
+
+#### 実装ファイル
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `src-tauri/src/nsfw.rs`（新規） | `NsfwResult { score: f32, label: String }` + `run_nsfw_classification()` + セッションキャッシュ |
+| `src-tauri/src/lib.rs` | `mod nsfw`追加、`ModelConfig` に `nsfw_model_path` / `nsfw_class_names_path` 追加、`classify_nsfw` コマンド登録 |
+| `src/types.ts` | `NsfwResult` 型追加、`ModelConfig` に `nsfw_model_path` / `nsfw_class_names_path` 追加 |
+| `src/store/index.ts` | `nsfwModelPath` / `nsfwClassNamesPath` / `nsfwResult` / `isClassifyingNsfw` 状態追加、`runNsfwClassification()` / `saveNsfwModelConfig()` アクション追加。ファイル切替時に `nsfwResult` をクリア |
+| `src/components/Toolbar.tsx` | `onDetectNsfw` prop追加、NSFW判定ボタン + `NsfwModelSettings` パネル（gear⚙）追加 |
+| `src/components/MetadataPanel.tsx` | `NsfwSection` 追加（スコアゲージバー＋ラベル表示） |
+| `src/App.tsx` | `handleDetectNsfw` ハンドラ追加、`Toolbar` に `onDetectNsfw` prop接続 |
+| `src/App.css` | NSFWゲージバー・バッジのスタイル追加 |
+
+#### UI仕様
+- **Toolbar**: `[🔞 NSFW判定] [⚙]` — 既存の物体検出・顔検出ボタンと同列に配置
+- **⚙ 設定パネル**: ONNX モデルパス（ファイル選択）+ クラス名ファイル（省略可）+ 保存ボタン
+- **MetadataPanel**: スコアに応じてグリーン→イエロー→レッドに変化するゲージバー + パーセント + ラベル（`safe` / `nsfw`）
+- **ログ**: `emit_log` で `[NSFW] 判定開始: {ファイル名}` / `[NSFW] 完了: nsfw (82%)` を出力
+
+#### 設定永続化
+`~/.imgraph/model_config.json` に `nsfw_model_path` / `nsfw_class_names_path` を追記。既存の `saveModelConfig` / `saveObjectModelConfig` / `saveFaceOnnxConfig` も新フィールドを保持するよう更新。
+
+---
+
+### 性的部位検知
+
+#### 調査結果
+
+| 方式 | モデル | 実装コスト | 備考 |
+|------|--------|-----------|------|
+| **NudeNet v3 ONNX**（推奨） | 事前学習済み | 低 | 既存コードと互換 |
+| YOLOv8 カスタム学習 | 新規学習 | 高 | データセット収集が必要 |
+| NudeNet Python subprocess | 事前学習済み | 中 | `pip install nudenet` 必須 |
+
+**NudeNet v3 の出力フォーマット（重要）:**
+- `640m.onnx`: 入力 `[1,3,640,640]`、出力 `[1,19,8400]` = `[1, 4+15クラス, 8400アンカー]`
+- `320n.onnx`: 入力 `[1,3,320,320]`、出力 `[1,19,3549]`
+- 形式は YOLOv8 と同一 → 既存 `yolo_detect()` の `num_classes = shape[1]-4` 判別ロジックが**そのまま動作**
+
+**結論: 新規 Rust コードほぼ不要**
+
+#### 方針決定: NudeNet v3 640m.onnx + 最小実装
+
+**理由**:
+1. 640m は入力 640×640 → 既存 `yolo_detect()` の `SZ=640` と一致、コード変更ゼロ
+2. 出力フォーマットが YOLOv8 互換 → `detect_objects` コマンドをそのまま使用
+3. バウンディングボックス出力 → 既存 BB エディタ・アノテーション機能と完全統合
+4. 事前学習済みで学習不要
+
+#### NudeNet v3 クラス定義（15クラス、4+15=19チャンネル）
+
+```
+FEMALE_GENITALIA_COVERED, FEMALE_FACE, BUTTOCKS_EXPOSED,
+FEMALE_BREAST_EXPOSED, FEMALE_GENITALIA_EXPOSED, MALE_BREAST_EXPOSED,
+ANUS_EXPOSED, FEET_EXPOSED, BELLY_COVERED, FEET_COVERED,
+ARMPITS_COVERED, ARMPITS_EXPOSED, FACE_MALE, BELLY_EXPOSED,
+MALE_GENITALIA_EXPOSED
+```
+
+#### モデル入手方法
+
+```bash
+pip install nudenet
+python -c "from nudenet import NudeDetector; NudeDetector()"
+# ~/.NudeNet/640m.onnx に自動ダウンロード
+```
+
+または GitHub リリースページから直接 `.onnx` を取得。
+
+#### 実装ファイル（最小構成）
+
+| ファイル | 変更内容 | 状態 |
+|---------|---------|------|
+| `src-tauri/src/inference.rs` | `yolo_detect()` に `conf_threshold: f32` 引数追加、`run_nudenet_detection()` / `yolo_detect_nudenet()` 追加、`NUDENET_CLASSES` 定数埋め込み | **実装済み** |
+| `src-tauri/src/lib.rs` | `ModelConfig` に `nudenet_model_path` / `nudenet_conf_threshold` 追加、`detect_nudenet` コマンド追加・登録 | **実装済み** |
+| `src/types.ts` | `InferenceMode` に `'nudenet'` 追加、`ModelConfig` 更新 | **実装済み** |
+| `src/store/index.ts` | `nudenetModelPath` / `nudenetConfThreshold` 状態追加、`runInference` に nudenet ブランチ追加、`saveNudenetConfig` 追加、全 saveConfig 関数に nudenet フィールド追加 | **実装済み** |
+| `src/components/Toolbar.tsx` | "部位検出"ボタン + `NudeNetModelSettings` パネル（スライダー付き）追加 | **実装済み** |
+| `src/components/MetadataPanel.tsx` | `modeLabel` に `'nudenet'` 対応追加 | **実装済み** |
+| `src/App.tsx` | `handleDetectNudenet` ハンドラ追加、Toolbar に prop 接続 | **実装済み** |
+| `src/App.css` | `.nudenet-conf-slider` スタイル追加 | **実装済み** |
+
+#### 互換性検証
+
+`yolo_detect()` の各処理が NudeNet 640m と一致することを確認済み：
+
+| 処理 | コード | NudeNet 640m | 判定 |
+|-----|--------|-------------|------|
+| 入力サイズ | `SZ = 640`（letterbox） | 640×640 | ✓ |
+| 正規化 | `/255.0`（0〜1） | `/255.0` | ✓ |
+| 出力形状チェック | `shape[len==3, batch==1]` | `[1,19,8400]` | ✓ |
+| クラス数自動検出 | `shape[1] - 4` | `19-4 = 15` | ✓ |
+| NMS・座標逆変換 | 実装済み | 同フォーマット | ✓ |
+
+#### 注意点・課題
+
+| 項目 | 内容 |
+|------|------|
+| 信頼度閾値 | `CONF_THRESHOLD` が 0.25 固定。NudeNet では 0.1〜0.2 が推奨 → `detect_objects` に `conf_threshold` 引数を追加すれば対応可（軽微な変更） |
+| 320n 対応 | `yolo_detect()` の `SZ` をパラメータ化（`u32` 引数）すれば対応可。軽量版が必要なら実施 |
+| クラス名ファイル | `nudenet_classes.txt` をアプリにバンドルし、NudeNet モデル選択時に自動補完 |
+| NSFW 判定との併用 | NSFW 判定（分類）+ 部位検出（検出）を独立して実行可能。結果は別々に表示 |

@@ -27,7 +27,7 @@ export interface BoundingBox {
   age?: number;       // 顔検知時の年齢推定値
 }
 
-export type InferenceMode = 'none' | 'object' | 'face';
+export type InferenceMode = 'none' | 'object' | 'face' | 'nudenet';
 
 export interface BundledScripts {
   detect_faces_py: string;
@@ -56,4 +56,7 @@ export interface ModelConfig {
   // Rust ONNX 顔検出 (空の場合は Python fallback)
   face_det_model_path: string;
   face_genderage_model_path: string;
+  // NudeNet 部位検出
+  nudenet_model_path: string;
+  nudenet_conf_threshold: number;
 }

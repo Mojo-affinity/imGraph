@@ -56,7 +56,14 @@ struct ModelConfig {
     face_det_model_path: String,
     #[serde(default)]
     face_genderage_model_path: String,
+    // NudeNet 部位検出
+    #[serde(default)]
+    nudenet_model_path: String,
+    #[serde(default = "default_nudenet_conf")]
+    nudenet_conf_threshold: f32,
 }
+
+fn default_nudenet_conf() -> f32 { 0.2 }
 
 fn model_config_path() -> PathBuf {
     let home = std::env::var("HOME")
@@ -352,6 +359,33 @@ async fn detect_faces_and_age(
     }
 }
 
+#[tauri::command]
+async fn detect_nudenet(
+    app: tauri::AppHandle,
+    image_path: String,
+    model_path: String,
+    conf_threshold: f32,
+) -> Result<Vec<inference::BoundingBox>, String> {
+    let fname = std::path::Path::new(&image_path)
+        .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
+    emit_log(&app, "info", format!("[NudeNet] 開始: {} (閾値={:.2})", fname, conf_threshold));
+
+    match inference::run_nudenet_detection(&image_path, &model_path, conf_threshold).await {
+        Ok(boxes) => {
+            let summary: Vec<String> = boxes.iter()
+                .map(|b| format!("{} ({:.0}%)", b.label, b.confidence * 100.0))
+                .collect();
+            emit_log(&app, "info", format!("[NudeNet] 完了: {}個 [{}]",
+                boxes.len(), summary.join(", ")));
+            Ok(boxes)
+        }
+        Err(e) => {
+            emit_log(&app, "error", format!("[NudeNet] エラー: {}", e));
+            Err(e)
+        }
+    }
+}
+
 // InsightFace キャッシュから genderage.onnx を自動検索
 #[tauri::command]
 fn find_insightface_genderage() -> Option<String> {
@@ -377,6 +411,7 @@ pub fn run() {
             get_is_training,
             detect_objects,
             detect_faces_and_age,
+            detect_nudenet,
             find_insightface_genderage,
             save_model_config,
             load_model_config,

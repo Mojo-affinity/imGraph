@@ -63,7 +63,10 @@ function DetectionList() {
 
   if (inferenceMode === 'none' && boundingBoxes.length === 0) return null;
 
-  const modeLabel = inferenceMode === 'face' ? '顔検出' : inferenceMode === 'object' ? '物体検出' : '';
+  const modeLabel = inferenceMode === 'face' ? '顔検出'
+    : inferenceMode === 'object' ? '物体検出'
+    : inferenceMode === 'nudenet' ? '部位検出'
+    : '';
 
   return (
     <section className="metadata-section">

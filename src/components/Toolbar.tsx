@@ -16,6 +16,7 @@ interface ToolbarProps {
   onSaveAnnotation: () => Promise<void>;
   onDetectObjects: () => void;
   onDetectFaces: () => void;
+  onDetectNudenet: () => void;
 }
 
 export function Toolbar({
@@ -30,6 +31,7 @@ export function Toolbar({
   onSaveAnnotation,
   onDetectObjects,
   onDetectFaces,
+  onDetectNudenet,
 }: ToolbarProps) {
   const [saved, setSaved] = useState(false);
 
@@ -92,6 +94,20 @@ export function Toolbar({
               物体検出
             </button>
             <ObjectModelSettings />
+          </div>
+
+          {/* 部位検出 + 設定ギア */}
+          <div className="toolbar__face-group">
+            <button
+              className="toolbar__inference-btn"
+              onClick={onDetectNudenet}
+              disabled={!canInfer}
+              title="NudeNet で部位検出"
+            >
+              <BodyIcon />
+              部位検出
+            </button>
+            <NudeNetModelSettings />
           </div>
 
           {/* 顔検出 + 設定ギア */}
@@ -485,6 +501,97 @@ function FaceModelSettings() {
   );
 }
 
+// ─── NudeNet 設定パネル ────────────────────────────────────────
+
+function NudeNetModelSettings() {
+  const { nudenetModelPath, nudenetConfThreshold, saveNudenetConfig } = useStore();
+  const [isOpen, setOpen] = useState(false);
+  const [modelPath, setModelPath] = useState(nudenetModelPath);
+  const [confThreshold, setConfThreshold] = useState(nudenetConfThreshold);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setModelPath(nudenetModelPath); }, [nudenetModelPath]);
+  useEffect(() => { setConfThreshold(nudenetConfThreshold); }, [nudenetConfThreshold]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  const browseModel = async () => {
+    const path = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'ONNX Model', extensions: ['onnx'] }],
+    });
+    if (typeof path === 'string') setModelPath(path);
+  };
+
+  const handleSave = async () => {
+    await saveNudenetConfig(modelPath, confThreshold);
+    setOpen(false);
+  };
+
+  return (
+    <div className="face-model-settings" ref={panelRef}>
+      <button
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        title="NudeNet 設定"
+      >
+        <GearIcon />
+      </button>
+
+      {isOpen && (
+        <div className="face-model-panel">
+          <p className="face-model-panel__title">部位検出設定（NudeNet）</p>
+
+          <label className="face-model-panel__label">
+            ONNX モデル
+            <span className="face-model-panel__hint">（640m.onnx）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={modelPath}
+              onChange={e => setModelPath(e.target.value)}
+              placeholder="640m.onnx のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseModel}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <label className="face-model-panel__label">
+            信頼度閾値: <strong>{confThreshold.toFixed(2)}</strong>
+            <span className="face-model-panel__hint">（推奨: 0.10〜0.25）</span>
+          </label>
+          <input
+            className="nudenet-conf-slider"
+            type="range"
+            min={0.05} max={0.50} step={0.05}
+            value={confThreshold}
+            onChange={e => setConfThreshold(Number(e.target.value))}
+          />
+
+          <div className="face-model-panel__actions">
+            <button className="face-model-panel__save" onClick={handleSave}>
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── アイコン ─────────────────────────────────────────────────
 
 function FolderIcon() {
@@ -500,6 +607,15 @@ function BoxIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M3 9h18M9 21V9" />
+    </svg>
+  );
+}
+
+function BodyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="5" r="2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v6m0 0-3 5m3-5 3 5M9 11h6" />
     </svg>
   );
 }
