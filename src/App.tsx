@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useMediaStore } from './hooks/useMediaStore';
 import { usePrefetch } from './hooks/usePrefetch';
@@ -16,6 +16,7 @@ function App() {
 
   const appendAppLog   = useStore(s => s.appendAppLog);
   const showLogWindow  = useStore(s => s.showLogWindow);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
     store.loadModelConfig();
@@ -37,13 +38,89 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') store.navigatePrev();
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') store.navigateNext();
+      const inInput = e.target instanceof HTMLInputElement
+        || e.target instanceof HTMLTextAreaElement
+        || (e.target as HTMLElement).isContentEditable;
+
+      // Ctrl+S: アノテーション保存（入力中でも有効）
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        store.saveAnnotation();
+        return;
+      }
+
+      if (inInput) return;
+
+      // ファイル移動
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')  { store.navigatePrev(); return; }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { store.navigateNext(); return; }
+      if (e.key === 'Home' && store.files.length > 0) {
+        e.preventDefault();
+        store.selectFile(0);
+        return;
+      }
+      if (e.key === 'End' && store.files.length > 0) {
+        e.preventDefault();
+        store.selectFile(store.files.length - 1);
+        return;
+      }
+
+      // レーティング（1〜5）
+      if (/^[1-5]$/.test(e.key) && store.selectedFile?.media_type === 'image') {
+        store.updateMetadata(store.selectedFile.path, { rating: Number(e.key) });
+        return;
+      }
+
+      // ズームリセット
+      if (e.key === '0') {
+        window.dispatchEvent(new CustomEvent('viewer:reset-zoom'));
+        return;
+      }
+
+      // 選択中 BB を削除
+      if ((e.key === 'Delete' || e.key === 'Backspace') && store.selectedBoxId) {
+        store.removeBoundingBox(store.selectedBoxId);
+        store.setSelectedBoxId(null);
+        return;
+      }
+
+      // BB 選択解除 / ショートカット一覧を閉じる
+      if (e.key === 'Escape') {
+        if (showShortcuts) { setShowShortcuts(false); return; }
+        store.setSelectedBoxId(null);
+        return;
+      }
+
+      // アノテーションモード切替
+      if (e.key.toLowerCase() === 'a') {
+        store.toggleAnnotationMode();
+        return;
+      }
+
+      // ログウィンドウ切替
+      if (e.key.toLowerCase() === 'l') {
+        store.toggleLogWindow();
+        return;
+      }
+
+      // ショートカット一覧
+      if (e.key === '?') {
+        setShowShortcuts(v => !v);
+        return;
+      }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [store.navigatePrev, store.navigateNext]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    store.navigatePrev, store.navigateNext, store.selectFile,
+    store.selectedFile, store.files.length,
+    store.selectedBoxId, store.removeBoundingBox, store.setSelectedBoxId,
+    store.toggleAnnotationMode, store.toggleLogWindow,
+    store.saveAnnotation, store.updateMetadata,
+    showShortcuts,
+  ]);
 
   const handleDetectObjects = () => {
     if (store.selectedFile?.media_type === 'image') {
@@ -100,6 +177,54 @@ function App() {
         />
       </div>
       {showLogWindow && <LogWindow />}
+      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
+    </div>
+  );
+}
+
+// ─── ショートカット一覧オーバーレイ ──────────────────────────────
+
+const SHORTCUTS: { keys: string[]; desc: string }[] = [
+  { keys: ['←', '↑'],           desc: '前のファイル' },
+  { keys: ['→', '↓'],           desc: '次のファイル' },
+  { keys: ['Home'],              desc: '最初のファイル' },
+  { keys: ['End'],               desc: '最後のファイル' },
+  { keys: ['1', '2', '3', '4', '5'], desc: 'レーティング設定' },
+  { keys: ['0'],                 desc: 'ズームリセット' },
+  { keys: ['A'],                 desc: 'アノテーションモード切替' },
+  { keys: ['Delete', 'BS'],      desc: '選択中 BB を削除' },
+  { keys: ['Esc'],               desc: 'BB 選択解除' },
+  { keys: ['Ctrl', 'S'],         desc: 'アノテーション保存' },
+  { keys: ['L'],                 desc: 'ログウィンドウ切替' },
+  { keys: ['?'],                 desc: 'このヘルプを表示' },
+];
+
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="shortcuts-overlay" onClick={onClose}>
+      <div className="shortcuts-panel" onClick={e => e.stopPropagation()}>
+        <div className="shortcuts-panel__header">
+          <span>キーボードショートカット</span>
+          <button className="shortcuts-panel__close" onClick={onClose}>×</button>
+        </div>
+        <table className="shortcuts-table">
+          <tbody>
+            {SHORTCUTS.map(({ keys, desc }) => (
+              <tr key={desc}>
+                <td className="shortcuts-table__keys">
+                  {keys.map((k, i) => (
+                    <span key={k}>
+                      <kbd className="shortcuts-kbd">{k}</kbd>
+                      {i < keys.length - 1 && <span className="shortcuts-sep"> + </span>}
+                    </span>
+                  ))}
+                </td>
+                <td className="shortcuts-table__desc">{desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -32,6 +32,13 @@ export function MediaViewer({ file }: MediaViewerProps) {
     setNaturalSize({ width: 0, height: 0 });
   }, [file?.path]);
 
+  // `0` キーによるズームリセット
+  useEffect(() => {
+    const handler = () => { setZoom(1); setPanX(0); setPanY(0); };
+    window.addEventListener('viewer:reset-zoom', handler);
+    return () => window.removeEventListener('viewer:reset-zoom', handler);
+  }, []);
+
   // Non-passive wheel listener required to call preventDefault()
   useEffect(() => {
     const el = viewerRef.current;
