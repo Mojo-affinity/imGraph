@@ -72,6 +72,9 @@ export function Toolbar({
 
       <div className="toolbar__spacer" />
 
+      {/* ログウィンドウトグル */}
+      <LogToggleButton />
+
       {/* アノテーションモード切替 */}
       {isImage && <AnnotationModeToggle />}
 
@@ -127,6 +130,33 @@ export function Toolbar({
         </button>
       )}
     </div>
+  );
+}
+
+// ─── ログトグルボタン ─────────────────────────────────────────
+
+function LogToggleButton() {
+  const appLogs       = useStore(s => s.appLogs);
+  const showLogWindow = useStore(s => s.showLogWindow);
+  const toggleLogWindow = useStore(s => s.toggleLogWindow);
+
+  const errorCount = appLogs.filter(l => l.level === 'error').length;
+  const hasNew = appLogs.length > 0;
+
+  return (
+    <button
+      className={`toolbar__log-btn${showLogWindow ? ' toolbar__log-btn--active' : ''}`}
+      onClick={toggleLogWindow}
+      title="ログウィンドウ"
+    >
+      <TerminalIcon />
+      ログ
+      {errorCount > 0 ? (
+        <span className="toolbar__log-badge toolbar__log-badge--error">{errorCount}</span>
+      ) : hasNew ? (
+        <span className="toolbar__log-badge">{appLogs.length}</span>
+      ) : null}
+    </button>
   );
 }
 
@@ -509,6 +539,15 @@ function CheckIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function TerminalIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }

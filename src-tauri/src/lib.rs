@@ -259,37 +259,95 @@ fn generate_dataset(
     dataset::generate(&source_dir, &output_dir, val_ratio)
 }
 
+// ─── ログイベント ─────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+struct AppLogEvent {
+    level: String,
+    message: String,
+}
+
+fn emit_log(app: &tauri::AppHandle, level: &str, message: impl Into<String>) {
+    app.emit("app-log", AppLogEvent {
+        level: level.to_string(),
+        message: message.into(),
+    }).ok();
+}
+
 // ─── 推論コマンド ─────────────────────────────────────────────
 
 #[tauri::command]
 async fn detect_objects(
+    app: tauri::AppHandle,
     image_path: String,
     model_path: String,
     class_names_path: String,
 ) -> Result<Vec<inference::BoundingBox>, String> {
-    inference::run_object_detection(&image_path, &model_path, &class_names_path).await
+    let fname = std::path::Path::new(&image_path)
+        .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
+    emit_log(&app, "info", format!("[物体検出] 開始: {}", fname));
+
+    match inference::run_object_detection(&image_path, &model_path, &class_names_path).await {
+        Ok(boxes) => {
+            emit_log(&app, "info", format!("[物体検出] 完了: {}個検出", boxes.len()));
+            Ok(boxes)
+        }
+        Err(e) => {
+            emit_log(&app, "error", format!("[物体検出] エラー: {}", e));
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
 async fn detect_faces_and_age(
+    app: tauri::AppHandle,
     image_path: String,
     script_path: String,
     model_dir: String,
     face_det_model_path: String,
     face_genderage_model_path: String,
 ) -> Result<Vec<inference::BoundingBox>, String> {
+    let fname = std::path::Path::new(&image_path)
+        .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
+
     if !face_det_model_path.is_empty() && !face_genderage_model_path.is_empty() {
-        // Rust ONNX パイプライン
-        tauri::async_runtime::spawn_blocking(move || {
+        emit_log(&app, "info", format!("[顔検出/ONNX] 開始: {}", fname));
+        let result = tauri::async_runtime::spawn_blocking(move || {
             face_inference::run_face_detection_onnx(
                 &image_path, &face_det_model_path, &face_genderage_model_path,
             )
         })
         .await
-        .map_err(|e| format!("タスク実行エラー: {}", e))?
+        .map_err(|e| format!("タスク実行エラー: {}", e))?;
+
+        match result {
+            Ok(boxes) => {
+                let summary: Vec<String> = boxes.iter().map(|b| {
+                    let age = b.age.map(|a| format!(" age={}", a)).unwrap_or_default();
+                    format!("{}{}", b.label, age)
+                }).collect();
+                emit_log(&app, "info", format!("[顔検出/ONNX] 完了: {}個 [{}]",
+                    boxes.len(), summary.join(", ")));
+                Ok(boxes)
+            }
+            Err(e) => {
+                emit_log(&app, "error", format!("[顔検出/ONNX] エラー: {}", e));
+                Err(e)
+            }
+        }
     } else {
-        // Python fallback
-        inference::run_face_detection(&image_path, &script_path, &model_dir).await
+        emit_log(&app, "info", format!("[顔検出/Python] 開始: {}", fname));
+        match inference::run_face_detection(&image_path, &script_path, &model_dir).await {
+            Ok(boxes) => {
+                emit_log(&app, "info", format!("[顔検出/Python] 完了: {}個検出", boxes.len()));
+                Ok(boxes)
+            }
+            Err(e) => {
+                emit_log(&app, "error", format!("[顔検出/Python] エラー: {}", e));
+                Err(e)
+            }
+        }
     }
 }
 

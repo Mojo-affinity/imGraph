@@ -11,6 +11,7 @@ import type {
   ModelConfig,
   DatasetInfo,
   BundledScripts,
+  LogEntry,
 } from '../types';
 
 // ─── イベントリスナー管理 (ストア外で保持) ───────────────────
@@ -77,6 +78,10 @@ interface StoreState {
   // ── UI モード ─────────────────────────────────────────────
   annotationMode: boolean;
 
+  // ── ログ ──────────────────────────────────────────────────
+  appLogs: LogEntry[];
+  showLogWindow: boolean;
+
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: () => Promise<void>;
   selectFile: (index: number) => void;
@@ -116,6 +121,12 @@ interface StoreState {
 
   // ── UI モード ─────────────────────────────────────────────
   toggleAnnotationMode: () => void;
+
+  // ── ログ ──────────────────────────────────────────────────
+  appendAppLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void;
+  clearAppLogs: () => void;
+  toggleLogWindow: () => void;
+  setShowLogWindow: (v: boolean) => void;
 }
 
 // ─── ストア ───────────────────────────────────────────────────
@@ -147,6 +158,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   bundledDetectFacesPy: '',
   bundledTrainPy: '',
   annotationMode: true,
+  appLogs: [],
+  showLogWindow: false,
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -413,6 +426,19 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   toggleAnnotationMode: () => set(s => ({ annotationMode: !s.annotationMode })),
+
+  appendAppLog: ({ level, message }) =>
+    set(s => ({
+      appLogs: [...s.appLogs, {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toLocaleTimeString('ja-JP', { hour12: false }),
+        level,
+        message,
+      }].slice(-500),
+    })),
+  clearAppLogs: () => set({ appLogs: [] }),
+  toggleLogWindow: () => set(s => ({ showLogWindow: !s.showLogWindow })),
+  setShowLogWindow: (v) => set({ showLogWindow: v }),
 
   saveObjectModelConfig: async (modelPath, classNamesPath) => {
     const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath } = get();
