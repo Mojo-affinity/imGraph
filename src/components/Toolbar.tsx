@@ -356,14 +356,17 @@ function FaceModelSettings() {
     setOpen(false);
   };
 
-  const useOnnx = detPath.trim() !== '' && gaPath.trim() !== '';
+  const useOnnx     = detPath.trim() !== '';
+  const useGenderage = gaPath.trim() !== '';
 
   return (
     <div className="face-model-settings" ref={panelRef}>
       <button
         className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}${useOnnx ? ' toolbar__gear-btn--onnx' : ''}`}
         onClick={() => setOpen(o => !o)}
-        title={useOnnx ? '顔検出設定 (Rust ONNX モード)' : '顔検出設定 (Python モード)'}
+        title={useOnnx
+          ? `顔検出設定 (ONNX${useGenderage ? ' + 年齢推定' : '・顔検出のみ'})`
+          : '顔検出設定 (Python モード)'}
       >
         <GearIcon />
       </button>
@@ -375,7 +378,11 @@ function FaceModelSettings() {
           {/* ── Rust ONNX モード ── */}
           <p className="face-model-panel__section">
             Rust ONNX モード
-            {useOnnx && <span className="face-model-panel__active-tag">使用中</span>}
+            {useOnnx && (
+              <span className="face-model-panel__active-tag">
+                {useGenderage ? '顔検出+年齢推定' : '顔検出のみ'}
+              </span>
+            )}
           </p>
 
           <label className="face-model-panel__label">
@@ -397,7 +404,7 @@ function FaceModelSettings() {
 
           <label className="face-model-panel__label">
             年齢・性別モデル
-            <span className="face-model-panel__hint">（InsightFace genderage.onnx）</span>
+            <span className="face-model-panel__hint">（任意 — 空欄で顔検出のみ）</span>
           </label>
           <div className="face-model-panel__row">
             <input
@@ -431,6 +438,7 @@ function FaceModelSettings() {
           <p className="face-model-panel__section">
             Python フォールバック
             {!useOnnx && <span className="face-model-panel__active-tag">使用中</span>}
+            {useOnnx && <span className="face-model-panel__hint" style={{marginLeft:6}}>（det モデル未設定時のみ）</span>}
           </p>
 
           <label className="face-model-panel__label">

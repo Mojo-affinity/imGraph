@@ -1,32 +1,32 @@
-/// YOLOv8-face ONNX + genderage.onnx による顔検出・年齢推定
+/// YOLOv8-face ONNX + (オプション) genderage.onnx による顔検出・年齢推定
 ///
-/// パイプライン:
-///   1. 画像を letterbox 640×640 にリサイズ
-///   2. YOLOv8-face 推論 → BBox + 5 ランドマーク
-///   3. NMS
-///   4. 各顔: InsightFace ArcFace 基準点との Umeyama 類似変換で
-///            face_size×face_size にアライン
-///   5. genderage.onnx 推論 → 性別 / 年齢
+/// 対応出力形状:
+///   [1, ch>=20, N]: YOLOv8-face (bbox + 5 keypoints) → Umeyama 顔アライン
+///   [1, 5<=ch<20, N]: bbox + conf のみ             → 単純クロップ
 ///
-/// YOLOv8-face ONNX 出力形状: [1, 20, 8400]
-///   ch 0-3  : cx, cy, w, h  (letterbox ピクセル座標)
-///   ch 4    : face confidence
-///   ch 5-19 : 5 keypoints × 3 (x, y, visibility)
-///             順: left_eye, right_eye, nose, left_mouth, right_mouth
-///
-/// genderage.onnx (InsightFace buffalo_sc) 入出力:
+/// genderage.onnx (InsightFace buffalo_l/buffalo_sc):
 ///   入力: [1, 3, 96, 96] float32 RGB [0, 255]
 ///   出力: [1, 3] → [female_prob, male_prob, age/100]
-
-use std::sync::{Mutex, OnceLock};
+///   ※ パス未設定なら顔検出のみ (label="face", age=None)
 
 use image::RgbImage;
 use ndarray::Array4;
 use ort::{session::Session, value::Tensor};
+use std::sync::{Mutex, OnceLock};
 
 use crate::inference::{iou, next_id, BoundingBox};
 
-// セッションキャッシュ: モデルパスが変わったときだけ再ロード
+// InsightFace ArcFace reference landmarks (112×112 space)
+const ARCFACE_REF_112: [[f32; 2]; 5] = [
+    [38.2946, 51.6963], // left eye
+    [73.5318, 51.5014], // right eye
+    [56.0252, 71.7366], // nose
+    [41.5493, 92.3655], // left mouth corner
+    [70.7299, 92.2041], // right mouth corner
+];
+
+// ─── セッションキャッシュ ─────────────────────────────────────────
+
 struct SessionCache {
     path: String,
     session: Session,
@@ -52,28 +52,17 @@ fn get_session(
     Ok(guard)
 }
 
-// InsightFace ArcFace reference landmarks (112×112 space)
-const ARCFACE_REF_112: [[f32; 2]; 5] = [
-    [38.2946, 51.6963], // left eye
-    [73.5318, 51.5014], // right eye
-    [56.0252, 71.7366], // nose
-    [41.5493, 92.3655], // left mouth corner
-    [70.7299, 92.2041], // right mouth corner
-];
-
-// ─── 類似変換推定 (Umeyama 簡略版) ─────────────────────────────
+// ─── Umeyama 類似変換 (5 点対) ───────────────────────────────────
 //
-// src: reference template 座標 (output 空間)
-// dst: 検出ランドマーク座標 (original image 空間)
-// 推定: xd ≈ a*xs - b*ys + tx,  yd ≈ b*xs + a*ys + ty
-// 戻り値: [a, b, tx, ty]
+// src: 出力空間 (ArcFace 基準点)、dst: 入力画像空間 (検出 kps)
+// 戻り値 [a, b, tx, ty]: xd = a·xs - b·ys + tx, yd = b·xs + a·ys + ty
+
 fn estimate_similarity(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> [f64; 4] {
     let mut ata = [[0f64; 4]; 4];
     let mut atb = [0f64; 4];
     for i in 0..5 {
         let (xs, ys) = (src[i][0] as f64, src[i][1] as f64);
         let (xd, yd) = (dst[i][0] as f64, dst[i][1] as f64);
-        // row_0: [xs, -ys, 1, 0], row_1: [ys, xs, 0, 1]
         let r0 = [xs, -ys, 1.0, 0.0f64];
         let r1 = [ys,  xs, 0.0, 1.0f64];
         for j in 0..4 {
@@ -86,7 +75,6 @@ fn estimate_similarity(src: &[[f32; 2]; 5], dst: &[[f32; 2]; 5]) -> [f64; 4] {
     gauss4(&ata, &atb)
 }
 
-// 部分ピボット付きガウス消去法 (4×4)
 fn gauss4(a: &[[f64; 4]; 4], b: &[f64; 4]) -> [f64; 4] {
     let mut m = [[0f64; 5]; 4];
     for i in 0..4 {
@@ -112,49 +100,80 @@ fn gauss4(a: &[[f64; 4]; 4], b: &[f64; 4]) -> [f64; 4] {
     })
 }
 
-// 類似変換パラメータ [a, b, tx, ty] から 2×3 アフィン行列を構築
-// 用途: output pixel (ox, oy) → input image (ix, iy) = M * [ox, oy, 1]
-fn affine_matrix(p: &[f64; 4]) -> [[f64; 3]; 2] {
-    [[p[0], -p[1], p[2]], [p[1], p[0], p[3]]]
-}
+// ─── 顔クロップ ──────────────────────────────────────────────────
 
-// バイリニア補間 (境界外は 0)
-fn bilinear(img: &RgbImage, x: f64, y: f64) -> [f32; 3] {
+// Umeyama アライン版: output(ox,oy) → input(ix,iy) バイリニア補間
+// estimate_similarity が返す [a,b,tx,ty] は template→image の順方向写像なので
+// そのまま ix = a*ox - b*oy + tx, iy = b*ox + a*oy + ty で input 座標を得る
+fn warp_face_umeyama(img: &RgbImage, params: &[f64; 4], size: usize) -> Array4<f32> {
+    let (a, b, tx, ty) = (params[0], params[1], params[2], params[3]);
     let (iw, ih) = (img.width() as i64, img.height() as i64);
-    let x0 = x.floor() as i64;
-    let y0 = y.floor() as i64;
-    let fx = (x - x0 as f64) as f32;
-    let fy = (y - y0 as f64) as f32;
-    let pix = |px: i64, py: i64| -> [f32; 3] {
-        if px < 0 || py < 0 || px >= iw || py >= ih { return [0.0; 3]; }
-        let p = img.get_pixel(px as u32, py as u32);
-        [p[0] as f32, p[1] as f32, p[2] as f32]
-    };
-    let p00 = pix(x0,   y0);
-    let p10 = pix(x0+1, y0);
-    let p01 = pix(x0,   y0+1);
-    let p11 = pix(x0+1, y0+1);
-    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
-    std::array::from_fn(|c| {
-        lerp(lerp(p00[c], p10[c], fx), lerp(p01[c], p11[c], fx), fy)
-    })
-}
+    let mut out = Array4::<f32>::zeros((1, 3, size, size));
 
-// アフィン変換でアライン済み顔画像テンソルを生成
-// 出力: [1, 3, face_size, face_size] float32 RGB [0, 255]
-fn warp_face(img: &RgbImage, m: &[[f64; 3]; 2], face_size: usize) -> Array4<f32> {
-    let mut out = Array4::<f32>::zeros((1, 3, face_size, face_size));
-    for oy in 0..face_size {
-        for ox in 0..face_size {
-            let ix = m[0][0] * ox as f64 + m[0][1] * oy as f64 + m[0][2];
-            let iy = m[1][0] * ox as f64 + m[1][1] * oy as f64 + m[1][2];
-            let rgb = bilinear(img, ix, iy);
-            out[[0, 0, oy, ox]] = rgb[0];
-            out[[0, 1, oy, ox]] = rgb[1];
-            out[[0, 2, oy, ox]] = rgb[2];
+    for oy in 0..size {
+        for ox in 0..size {
+            let ix = a * ox as f64 - b * oy as f64 + tx;
+            let iy = b * ox as f64 + a * oy as f64 + ty;
+            let x0 = ix.floor() as i64;
+            let y0 = iy.floor() as i64;
+            let fx = (ix - x0 as f64) as f32;
+            let fy = (iy - y0 as f64) as f32;
+
+            let pix = |px: i64, py: i64| -> [f32; 3] {
+                if px < 0 || py < 0 || px >= iw || py >= ih { return [0.0; 3]; }
+                let p = img.get_pixel(px as u32, py as u32);
+                [p[0] as f32, p[1] as f32, p[2] as f32]
+            };
+            let p00 = pix(x0, y0); let p10 = pix(x0+1, y0);
+            let p01 = pix(x0, y0+1); let p11 = pix(x0+1, y0+1);
+            for c in 0..3 {
+                let top = p00[c] + (p10[c] - p00[c]) * fx;
+                let bot = p01[c] + (p11[c] - p01[c]) * fx;
+                out[[0, c, oy, ox]] = top + (bot - top) * fy;
+            }
         }
     }
     out
+}
+
+// 単純クロップ版: image クレートの resize を使用（SIMD 最適化済み）
+fn crop_face_simple(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usize) -> Array4<f32> {
+    let iw = img.width() as f32;
+    let ih = img.height() as f32;
+    // 中心を基準に正方形クロップ
+    let cx = (x1 + bw / 2.0).clamp(0.0, iw);
+    let cy = (y1 + bh / 2.0).clamp(0.0, ih);
+    let half = (bw.max(bh) / 2.0)
+        .min(cx).min(cy)
+        .min(iw - cx).min(ih - cy)
+        .max(1.0);
+    let crop_x = (cx - half) as u32;
+    let crop_y = (cy - half) as u32;
+    let crop_s = ((half * 2.0) as u32)
+        .min(img.width().saturating_sub(crop_x))
+        .min(img.height().saturating_sub(crop_y))
+        .max(1);
+
+    let crop = image::imageops::crop_imm(img, crop_x, crop_y, crop_s, crop_s);
+    let resized = image::imageops::resize(
+        &*crop, size as u32, size as u32, image::imageops::FilterType::Triangle,
+    );
+
+    let mut out = Array4::<f32>::zeros((1, 3, size, size));
+    for (x, y, p) in resized.enumerate_pixels() {
+        out[[0, 0, y as usize, x as usize]] = p[0] as f32;
+        out[[0, 1, y as usize, x as usize]] = p[1] as f32;
+        out[[0, 2, y as usize, x as usize]] = p[2] as f32;
+    }
+    out
+}
+
+// ─── 内部 Detection 構造体 ────────────────────────────────────────
+
+struct Det {
+    cx: f32, cy: f32, w: f32, h: f32,
+    score: f32,
+    kps: Option<[[f32; 2]; 5]>,
 }
 
 // ─── 公開エントリポイント ────────────────────────────────────────
@@ -162,7 +181,7 @@ fn warp_face(img: &RgbImage, m: &[[f64; 3]; 2], face_size: usize) -> Array4<f32>
 pub fn run_face_detection_onnx(
     image_path: &str,
     face_model_path: &str,
-    genderage_model_path: &str,
+    genderage_model_path: &str,  // 空文字 = 顔検出のみ
 ) -> Result<Vec<BoundingBox>, String> {
     // ── 1. 画像読み込み ──────────────────────────────────────
     let img = image::open(image_path)
@@ -180,27 +199,23 @@ pub fn run_face_detection_onnx(
     let pad_y = ((SZ - new_h) / 2) as f32;
 
     let resized = image::imageops::resize(
-        &img_rgb, new_w, new_h,
-        image::imageops::FilterType::Triangle,
+        &img_rgb, new_w, new_h, image::imageops::FilterType::Triangle,
     );
     let mut input = Array4::<f32>::zeros((1, 3, SZ as usize, SZ as usize));
-    for y in 0..new_h {
-        for x in 0..new_w {
-            let p = resized.get_pixel(x, y);
-            let px = (x as f32 + pad_x) as usize;
-            let py = (y as f32 + pad_y) as usize;
-            input[[0, 0, py, px]] = p[0] as f32 / 255.0;
-            input[[0, 1, py, px]] = p[1] as f32 / 255.0;
-            input[[0, 2, py, px]] = p[2] as f32 / 255.0;
-        }
+    for (x, y, p) in resized.enumerate_pixels() {
+        let px = (x as f32 + pad_x) as usize;
+        let py = (y as f32 + pad_y) as usize;
+        input[[0, 0, py, px]] = p[0] as f32 / 255.0;
+        input[[0, 1, py, px]] = p[1] as f32 / 255.0;
+        input[[0, 2, py, px]] = p[2] as f32 / 255.0;
     }
 
     // ── 3. 顔検出推論 ───────────────────────────────────────
     let mut face_guard = get_session(&FACE_SESS, face_model_path)?;
+    let face_sess = face_guard.as_mut().unwrap();
 
     let face_tensor = Tensor::<f32>::from_array(input)
         .map_err(|e| format!("テンソル構築: {}", e))?;
-    let face_sess = face_guard.as_mut().unwrap();
     let face_out = face_sess.session
         .run(ort::inputs![face_tensor])
         .map_err(|e| format!("顔検出推論: {}", e))?;
@@ -209,31 +224,31 @@ pub fn run_face_detection_onnx(
         .map_err(|e| format!("出力取得: {}", e))?;
 
     let shape = face_arr.shape();
-    if shape.len() != 3 || shape[1] < 20 {
+    if shape.len() != 3 || shape[1] < 5 {
         return Err(format!(
-            "YOLOv8-face: 予期しない出力形状 {:?} (期待: [1,20,8400])",
+            "顔検出: 非対応の出力形状 {:?} (期待: [1, >=5, N])",
             shape
         ));
     }
-    let n = shape[2];
+    let channels = shape[1];
+    let n        = shape[2];
+    let has_kps  = channels >= 20;
 
-    // ── 4. 検出結果パース ────────────────────────────────────
+    // ── 4. 検出結果パース + NMS ──────────────────────────────
     const CONF_THR: f32 = 0.40;
-    const IOU_THR: f32  = 0.45;
-
-    struct Det {
-        cx: f32, cy: f32, w: f32, h: f32,
-        score: f32,
-        kps: [[f32; 2]; 5],
-    }
+    const IOU_THR:  f32 = 0.45;
 
     let mut dets: Vec<Det> = (0..n)
         .filter_map(|i| {
             let score = face_arr[[0, 4, i]];
             if score < CONF_THR { return None; }
-            let kps = std::array::from_fn::<[f32; 2], 5, _>(|k| {
-                [face_arr[[0, 5 + k * 3, i]], face_arr[[0, 5 + k * 3 + 1, i]]]
-            });
+            let kps = if has_kps {
+                Some(std::array::from_fn::<[f32; 2], 5, _>(|k| {
+                    [face_arr[[0, 5 + k * 3, i]], face_arr[[0, 5 + k * 3 + 1, i]]]
+                }))
+            } else {
+                None
+            };
             Some(Det {
                 cx: face_arr[[0, 0, i]], cy: face_arr[[0, 1, i]],
                 w:  face_arr[[0, 2, i]], h:  face_arr[[0, 3, i]],
@@ -242,7 +257,6 @@ pub fn run_face_detection_onnx(
         })
         .collect();
 
-    // Greedy NMS
     dets.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     let mut keep = vec![true; dets.len()];
     for i in 0..dets.len() {
@@ -256,71 +270,77 @@ pub fn run_face_detection_onnx(
         }
     }
 
-    // ── 5. genderage セッション準備 ─────────────────────────
-    let mut ga_guard = get_session(&GA_SESS, genderage_model_path)?;
-    let ga_sess_ref = ga_guard.as_mut().unwrap();
+    // ── 5. genderage セッション準備 (オプション) ────────────
+    let use_genderage = !genderage_model_path.is_empty();
 
-    // モデルの入力 H を動的取得。取れない場合は 96 (buffalo_sc デフォルト)
-    let ga_size: usize = {
-        let inputs = ga_sess_ref.session.inputs();
-        if let Some(outlet) = inputs.first() {
-            if let ort::value::ValueType::Tensor { ref shape, .. } = outlet.dtype() {
-                shape.get(2).filter(|&&d| d > 0).map(|&d| d as usize).unwrap_or(96)
-            } else {
-                96
-            }
-        } else {
-            96
-        }
+    let (ga_size, mut ga_guard) = if use_genderage {
+        let mut guard = get_session(&GA_SESS, genderage_model_path)?;
+        let size: usize = {
+            let sess = guard.as_ref().unwrap();
+            let inputs = sess.session.inputs();
+            if let Some(outlet) = inputs.first() {
+                if let ort::value::ValueType::Tensor { ref shape, .. } = outlet.dtype() {
+                    shape.get(2).filter(|&&d| d > 0).map(|&d| d as usize).unwrap_or(96)
+                } else { 96 }
+            } else { 96 }
+        };
+        (size, Some(guard))
+    } else {
+        (96, None)
     };
 
-    // ── 6. 各顔の年齢・性別推定 ─────────────────────────────
+    // ── 6. 各顔の処理 ───────────────────────────────────────
     let ref_scale = ga_size as f32 / 112.0;
     let ref_pts: [[f32; 2]; 5] =
         std::array::from_fn(|k| [ARCFACE_REF_112[k][0] * ref_scale, ARCFACE_REF_112[k][1] * ref_scale]);
 
     let mut result: Vec<BoundingBox> = Vec::new();
 
-    for (det, &k) in dets.iter().zip(keep.iter()) {
-        if !k { continue; }
+    for (det, &kept) in dets.iter().zip(keep.iter()) {
+        if !kept { continue; }
 
-        // Letterbox → original image ピクセル座標
+        // Letterbox → 元画像ピクセル座標
         let x1 = (det.cx - det.w / 2.0 - pad_x) / scale;
         let y1 = (det.cy - det.h / 2.0 - pad_y) / scale;
-        let bw = det.w / scale;
-        let bh = det.h / scale;
+        let bw  = det.w / scale;
+        let bh  = det.h / scale;
 
-        // キーポイントも逆変換
-        let kps_orig: [[f32; 2]; 5] = std::array::from_fn(|k| {
-            [(det.kps[k][0] - pad_x) / scale, (det.kps[k][1] - pad_y) / scale]
-        });
+        let (label, age) = if use_genderage {
+            let face_input = if let Some(kps) = &det.kps {
+                // Umeyama アライン
+                let kps_orig: [[f32; 2]; 5] = std::array::from_fn(|k| {
+                    [(kps[k][0] - pad_x) / scale, (kps[k][1] - pad_y) / scale]
+                });
+                let params = estimate_similarity(&ref_pts, &kps_orig);
+                warp_face_umeyama(&img_rgb, &params, ga_size)
+            } else {
+                // 単純クロップ
+                crop_face_simple(&img_rgb, x1, y1, bw, bh, ga_size)
+            };
 
-        // 類似変換: ref_pts (出力空間) → kps_orig (入力画像空間)
-        let params = estimate_similarity(&ref_pts, &kps_orig);
-        let m = affine_matrix(&params);
-        let face_arr_warped = warp_face(&img_rgb, &m, ga_size);
+            let ga_sess = ga_guard.as_mut().unwrap().as_mut().unwrap();
+            let ga_tensor = Tensor::<f32>::from_array(face_input)
+                .map_err(|e| format!("顔テンソル構築: {}", e))?;
+            let ga_out = ga_sess.session
+                .run(ort::inputs![ga_tensor])
+                .map_err(|e| format!("年齢推定推論: {}", e))?;
+            let ga_arr = ga_out[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("年齢推定出力: {}", e))?;
 
-        // genderage 推論
-        let ga_tensor = Tensor::<f32>::from_array(face_arr_warped)
-            .map_err(|e| format!("顔テンソル構築: {}", e))?;
-        let ga_out = ga_sess_ref.session
-            .run(ort::inputs![ga_tensor])
-            .map_err(|e| format!("年齢推定推論: {}", e))?;
-        let ga_arr = ga_out[0]
-            .try_extract_array::<f32>()
-            .map_err(|e| format!("年齢推定出力: {}", e))?;
-
-        let (label, age) = if ga_arr.shape().get(1).copied().unwrap_or(0) >= 3 {
-            let female = ga_arr[[0, 0]];
-            let male   = ga_arr[[0, 1]];
-            let age    = (ga_arr[[0, 2]] * 100.0).round() as u32;
-            let gender = if male > female { "male" } else { "female" };
-            (gender.to_string(), age)
+            if ga_arr.shape().get(1).copied().unwrap_or(0) >= 3 {
+                let female = ga_arr[[0, 0]];
+                let male   = ga_arr[[0, 1]];
+                let age    = (ga_arr[[0, 2]] * 100.0).round() as u32;
+                let gender = if male > female { "male" } else { "female" };
+                (gender.to_string(), Some(age))
+            } else {
+                ("face".to_string(), None)
+            }
         } else {
-            ("face".to_string(), 0)
+            ("face".to_string(), None)
         };
 
-        // 正規化座標に変換
         let nx = (x1 / orig_w).clamp(0.0, 1.0);
         let ny = (y1 / orig_h).clamp(0.0, 1.0);
         let nw = (bw / orig_w).clamp(0.0, 1.0 - nx);
@@ -332,11 +352,29 @@ pub fn run_face_detection_onnx(
             width: nw as f64, height: nh as f64,
             label,
             confidence: det.score as f64,
-            age: if age > 0 { Some(age) } else { None },
+            age,
         });
     }
 
     Ok(result)
+}
+
+// ─── InsightFace キャッシュからの自動検索 ────────────────────────
+
+pub fn find_insightface_genderage() -> Option<String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    for pack in &["buffalo_l", "buffalo_sc", "buffalo_s"] {
+        let path = std::path::PathBuf::from(&home)
+            .join(".insightface/models")
+            .join(pack)
+            .join("genderage.onnx");
+        if path.exists() {
+            return Some(path.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -363,22 +401,19 @@ mod tests {
         }
         assert!(!boxes.is_empty(), "no faces detected in test image");
     }
-}
 
-// ─── InsightFace キャッシュからの自動検索 ────────────────────────
-
-pub fn find_insightface_genderage() -> Option<String> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()?;
-    for pack in &["buffalo_sc", "buffalo_l", "buffalo_s"] {
-        let path = std::path::PathBuf::from(&home)
-            .join(".insightface/models")
-            .join(pack)
-            .join("genderage.onnx");
-        if path.exists() {
-            return Some(path.to_string_lossy().to_string());
+    #[test]
+    fn test_detect_only() {
+        let img = "/tmp/test_face.jpg";
+        let det = "/home/ubuntu/models/yolov8n-face.onnx";
+        if !std::path::Path::new(img).exists() || !std::path::Path::new(det).exists() {
+            eprintln!("test assets not found, skipping");
+            return;
         }
+        // genderage なしで実行
+        let boxes = run_face_detection_onnx(img, det, "").expect("detect-only failed");
+        eprintln!("Detect-only: {} face(s)", boxes.len());
+        assert!(!boxes.is_empty());
+        assert!(boxes.iter().all(|b| b.age.is_none()));
     }
-    None
 }

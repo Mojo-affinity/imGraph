@@ -311,8 +311,9 @@ async fn detect_faces_and_age(
     let fname = std::path::Path::new(&image_path)
         .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
 
-    if !face_det_model_path.is_empty() && !face_genderage_model_path.is_empty() {
-        emit_log(&app, "info", format!("[顔検出/ONNX] 開始: {}", fname));
+    if !face_det_model_path.is_empty() {
+        let mode = if face_genderage_model_path.is_empty() { "顔検出のみ" } else { "顔検出+年齢推定" };
+        emit_log(&app, "info", format!("[ONNX/{}] 開始: {}", mode, fname));
         let result = tauri::async_runtime::spawn_blocking(move || {
             face_inference::run_face_detection_onnx(
                 &image_path, &face_det_model_path, &face_genderage_model_path,
@@ -327,8 +328,8 @@ async fn detect_faces_and_age(
                     let age = b.age.map(|a| format!(" age={}", a)).unwrap_or_default();
                     format!("{}{}", b.label, age)
                 }).collect();
-                emit_log(&app, "info", format!("[顔検出/ONNX] 完了: {}個 [{}]",
-                    boxes.len(), summary.join(", ")));
+                emit_log(&app, "info", format!("[ONNX/{}] 完了: {}個 [{}]",
+                    mode, boxes.len(), summary.join(", ")));
                 Ok(boxes)
             }
             Err(e) => {

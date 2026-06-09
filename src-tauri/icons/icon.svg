@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f051a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#051421;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="polyGradPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8A2BE2;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#FF00FF;stop-opacity:0.2" />
+    </linearGradient>
+
+    <linearGradient id="polyGradCyan" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00BFFF;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#00FFCC;stop-opacity:0.2" />
+    </linearGradient>
+
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#00BFFF" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#00BFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="64" fill="url(#bgGrad)" stroke="#223344" stroke-width="4"/>
+  <rect x="48" y="48" width="416" height="416" rx="48" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.1"/>
+
+  <g>
+    <rect x="112" y="128" width="288" height="256" rx="16" fill="#00BFFF" opacity="0.15" />
+    <rect x="112" y="128" width="288" height="256" rx="16" fill="none" stroke="#00BFFF" stroke-width="4" stroke-dasharray="12 8" opacity="0.7"/>
+    
+    <path d="M 112 160 L 112 128 L 144 128" fill="none" stroke="#00BFFF" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter"/>
+    <path d="M 400 160 L 400 128 L 368 128" fill="none" stroke="#00BFFF" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter"/>
+    <path d="M 112 352 L 112 384 L 144 384" fill="none" stroke="#00BFFF" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter"/>
+    <path d="M 400 352 L 400 384 L 368 384" fill="none" stroke="#00BFFF" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter"/>
+  </g>
+
+  <polygon points="256,256 160,160 352,144" fill="url(#polyGradPurple)" />
+  <polygon points="256,256 352,144 384,320" fill="url(#polyGradCyan)" />
+  <polygon points="256,256 384,320 192,368" fill="url(#polyGradPurple)" />
+  <polygon points="256,256 192,368 160,160" fill="url(#polyGradCyan)" />
+
+  <polygon points="160,160 128,256 192,368" fill="#8A2BE2" opacity="0.4" />
+  <polygon points="352,144 400,224 384,320" fill="#00BFFF" opacity="0.3" />
+
+  <circle cx="160" cy="160" r="16" fill="#FFFFFF" />
+  <circle cx="160" cy="160" r="24" fill="url(#glow)" />
+
+  <circle cx="352" cy="144" r="12" fill="#8A2BE2" />
+  <circle cx="384" cy="320" r="18" fill="#FFFFFF" />
+  <circle cx="384" cy="320" r="26" fill="url(#glow)" />
+  
+  <circle cx="192" cy="368" r="14" fill="#8A2BE2" />
+  <circle cx="128" cy="256" r="10" fill="#00BFFF" />
+  <circle cx="400" cy="224" r="10" fill="#8A2BE2" />
+
+  <circle cx="256" cy="256" r="24" fill="#FFFFFF" />
+  <circle cx="256" cy="256" r="32" fill="url(#glow)" />
+  <circle cx="256" cy="256" r="10" fill="#051421" />
+
+</svg>
+
