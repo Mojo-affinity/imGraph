@@ -301,6 +301,25 @@ fn crop_face_nchw_imagenet(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, s
     out
 }
 
+// age logits/probs から softmax 加重期待値で年齢を推定
+fn softmax_weighted_age(values: &[f32]) -> u32 {
+    if values.is_empty() { return 0; }
+    if values.len() == 1 {
+        let v = values[0];
+        return if v <= 1.0 { (v * 100.0).round() as u32 } else { v.round().max(0.0) as u32 };
+    }
+    // softmax (数値安定化のため max を引く)
+    let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = values.iter().map(|&v| (v - max).exp()).collect();
+    let sum: f32 = exps.iter().sum();
+    if sum <= 0.0 { return 0; }
+    // 加重期待値: E[age] = Σ i * softmax(logits)[i]
+    (exps.iter().enumerate()
+        .map(|(i, &e)| i as f32 * e / sum)
+        .sum::<f32>())
+    .round() as u32
+}
+
 // ─── 内部 Detection 構造体 ────────────────────────────────────────
 
 struct Det {
@@ -496,9 +515,7 @@ pub fn run_face_detection_onnx(
                         [(kps[k][0] - pad_x) / scale, (kps[k][1] - pad_y) / scale]
                     });
                     let params = estimate_similarity(&ref_pts, &kps_orig);
-                    // Umeyama アライン後に ImageNet 正規化
                     let aligned = warp_face_umeyama(&img_rgb, &params, *size);
-                    // warp_face_umeyama は [0,255] NCHW → ImageNet 正規化に変換
                     let mut norm = Array4::<f32>::zeros((1, 3, *size, *size));
                     for c in 0..3 {
                         for y in 0..*size {
@@ -521,39 +538,28 @@ pub fn run_face_detection_onnx(
                     .run(ort::inputs![ga_tensor])
                     .map_err(|e| format!("age-gender 推論: {}", e))?;
 
-                // 出力0: age（スカラー or 確率分布）
-                let age_arr = ga_out[0]
+                let flat0: Vec<f32> = ga_out[0]
                     .try_extract_array::<f32>()
-                    .map_err(|e| format!("age 出力取得: {}", e))?;
-                let age_flat: Vec<f32> = age_arr.iter().cloned().collect();
-                let age = if age_flat.len() == 1 {
-                    // スカラー: そのまま使用（0〜100 or 0〜1 を判定）
-                    let v = age_flat[0];
-                    if v <= 1.0 { (v * 100.0).round() as u32 } else { v.round() as u32 }
+                    .map_err(|e| format!("出力0取得: {}", e))?
+                    .iter().cloned().collect();
+
+                let (age_flat, gender_flat): (Vec<f32>, Vec<f32>) = if ga_out.len() >= 2 {
+                    let flat1: Vec<f32> = ga_out[1]
+                        .try_extract_array::<f32>()
+                        .map_err(|e| format!("出力1取得: {}", e))?
+                        .iter().cloned().collect();
+                    // 要素数が多い方が age 分布 (〜101)、少ない方が gender (2)
+                    if flat0.len() >= flat1.len() { (flat0, flat1) } else { (flat1, flat0) }
                 } else {
-                    // 確率分布: 加重期待値（インデックス = 年齢）
-                    let sum: f32 = age_flat.iter().sum();
-                    if sum > 0.0 {
-                        let exp: f32 = age_flat.iter().enumerate()
-                            .map(|(i, &p)| i as f32 * p)
-                            .sum();
-                        (exp / sum).round() as u32
-                    } else {
-                        0
-                    }
+                    (flat0, vec![])
                 };
 
-                // 出力1: gender [female_prob, male_prob]（慣習: index0=female, index1=male）
-                let gender_label = if ga_out.len() >= 2 {
-                    let g_arr = ga_out[1]
-                        .try_extract_array::<f32>()
-                        .map_err(|e| format!("gender 出力取得: {}", e))?;
-                    let g: Vec<f32> = g_arr.iter().cloned().collect();
-                    if g.len() >= 2 {
-                        if g[1] > g[0] { "male" } else { "female" }
-                    } else {
-                        "face"
-                    }
+                // age: softmax 後に加重期待値（logits・確率分布どちらも対応）
+                let age = softmax_weighted_age(&age_flat);
+
+                // gender: argmax（logits でも確率でも argmax は等価）
+                let gender_label = if gender_flat.len() >= 2 {
+                    if gender_flat[1] > gender_flat[0] { "male" } else { "female" }
                 } else {
                     "face"
                 };
