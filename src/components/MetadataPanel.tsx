@@ -3,6 +3,45 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import type { MediaMetadata } from '../types';
 
+// ─── NSFW 判定結果 ─────────────────────────────────────────────
+
+function NsfwSection() {
+  const nsfwResult = useStore(s => s.nsfwResult);
+  const isClassifyingNsfw = useStore(s => s.isClassifyingNsfw);
+
+  if (!isClassifyingNsfw && !nsfwResult) return null;
+
+  return (
+    <section className="metadata-section nsfw-section">
+      <h4 className="metadata-section__title">NSFW 判定</h4>
+      {isClassifyingNsfw ? (
+        <div className="detection-loading">
+          <span className="toolbar__spinner" />
+          判定中…
+        </div>
+      ) : nsfwResult && (
+        <>
+          <div className={`nsfw-label nsfw-label--${nsfwResult.label}`}>
+            {nsfwResult.label === 'nsfw' ? '⚠ NSFW' : '✓ SAFE'}
+          </div>
+          <div className="nsfw-gauge">
+            <div
+              className="nsfw-gauge__bar"
+              style={{ width: `${nsfwResult.score * 100}%` }}
+              data-level={
+                nsfwResult.score >= 0.7 ? 'high'
+                  : nsfwResult.score >= 0.4 ? 'mid'
+                  : 'low'
+              }
+            />
+          </div>
+          <div className="nsfw-score">{Math.round(nsfwResult.score * 100)}%</div>
+        </>
+      )}
+    </section>
+  );
+}
+
 // ─── 検出結果リスト ────────────────────────────────────────────
 
 // 選択中ボックスのラベルをインライン編集するコンポーネント
@@ -129,6 +168,7 @@ export function MetadataPanel({ fileName, metadata, onUpdate }: MetadataPanelPro
   if (!metadata || !fileName) {
     return (
       <div className="metadata-panel">
+        <NsfwSection />
         <DetectionList />
         <TrainingSection />
       </div>
@@ -156,6 +196,8 @@ export function MetadataPanel({ fileName, metadata, onUpdate }: MetadataPanelPro
       <div className="metadata-panel__header">
         <span className="metadata-panel__filename">{fileName}</span>
       </div>
+
+      <NsfwSection />
 
       <section className="metadata-section">
         <h4 className="metadata-section__title">評価</h4>

@@ -29,6 +29,11 @@ export interface BoundingBox {
 
 export type InferenceMode = 'none' | 'object' | 'face' | 'nudenet';
 
+export interface NsfwResult {
+  score: number;   // 0.0-1.0
+  label: string;   // "safe" | "nsfw"
+}
+
 export interface BundledScripts {
   detect_faces_py: string;
   train_py: string;
@@ -59,4 +64,7 @@ export interface ModelConfig {
   // NudeNet 部位検出
   nudenet_model_path: string;
   nudenet_conf_threshold: number;
+  // NSFW 画像分類
+  nsfw_model_path: string;
+  nsfw_class_names_path: string;
 }

@@ -140,6 +140,12 @@ function App() {
     }
   };
 
+  const handleDetectNsfw = () => {
+    if (store.selectedFile?.media_type === 'image') {
+      store.runNsfwClassification(store.selectedFile.path);
+    }
+  };
+
   return (
     <div className="app">
       <Toolbar
@@ -155,6 +161,7 @@ function App() {
         onDetectObjects={handleDetectObjects}
         onDetectFaces={handleDetectFaces}
         onDetectNudenet={handleDetectNudenet}
+        onDetectNsfw={handleDetectNsfw}
       />
       {store.error && (
         <div className="error-banner">{store.error}</div>

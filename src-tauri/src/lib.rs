@@ -2,6 +2,7 @@ mod annotation;
 mod dataset;
 mod face_inference;
 mod inference;
+mod nsfw;
 mod training;
 
 use serde::{Deserialize, Serialize};
@@ -61,6 +62,11 @@ struct ModelConfig {
     nudenet_model_path: String,
     #[serde(default = "default_nudenet_conf")]
     nudenet_conf_threshold: f32,
+    // NSFW 画像分類
+    #[serde(default)]
+    nsfw_model_path: String,
+    #[serde(default)]
+    nsfw_class_names_path: String,
 }
 
 fn default_nudenet_conf() -> f32 { 0.2 }
@@ -386,6 +392,35 @@ async fn detect_nudenet(
     }
 }
 
+#[tauri::command]
+async fn classify_nsfw(
+    app: tauri::AppHandle,
+    image_path: String,
+    model_path: String,
+    class_names_path: String,
+) -> Result<nsfw::NsfwResult, String> {
+    let fname = std::path::Path::new(&image_path)
+        .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
+    emit_log(&app, "info", format!("[NSFW] 開始: {}", fname));
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        nsfw::run_nsfw_classification(&image_path, &model_path, &class_names_path)
+    })
+    .await
+    .map_err(|e| format!("タスク実行エラー: {}", e))?;
+
+    match result {
+        Ok(r) => {
+            emit_log(&app, "info", format!("[NSFW] 完了: {} ({:.0}%)", r.label, r.score * 100.0));
+            Ok(r)
+        }
+        Err(e) => {
+            emit_log(&app, "error", format!("[NSFW] エラー: {}", e));
+            Err(e)
+        }
+    }
+}
+
 // InsightFace キャッシュから genderage.onnx を自動検索
 #[tauri::command]
 fn find_insightface_genderage() -> Option<String> {
@@ -412,6 +447,7 @@ pub fn run() {
             detect_objects,
             detect_faces_and_age,
             detect_nudenet,
+            classify_nsfw,
             find_insightface_genderage,
             save_model_config,
             load_model_config,

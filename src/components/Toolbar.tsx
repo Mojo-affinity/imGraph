@@ -17,6 +17,7 @@ interface ToolbarProps {
   onDetectObjects: () => void;
   onDetectFaces: () => void;
   onDetectNudenet: () => void;
+  onDetectNsfw: () => void;
 }
 
 export function Toolbar({
@@ -32,6 +33,7 @@ export function Toolbar({
   onDetectObjects,
   onDetectFaces,
   onDetectNudenet,
+  onDetectNsfw,
 }: ToolbarProps) {
   const [saved, setSaved] = useState(false);
 
@@ -94,6 +96,12 @@ export function Toolbar({
               物体検出
             </button>
             <ObjectModelSettings />
+          </div>
+
+          {/* NSFW 判定 + 設定ギア */}
+          <div className="toolbar__face-group">
+            <NsfwButton onDetectNsfw={onDetectNsfw} canInfer={canInfer} />
+            <NsfwModelSettings />
           </div>
 
           {/* 部位検出 + 設定ギア */}
@@ -504,6 +512,128 @@ function FaceModelSettings() {
   );
 }
 
+// ─── NSFW 判定ボタン ──────────────────────────────────────────
+
+function NsfwButton({ onDetectNsfw, canInfer }: { onDetectNsfw: () => void; canInfer: boolean }) {
+  const isClassifyingNsfw = useStore(s => s.isClassifyingNsfw);
+  return (
+    <button
+      className="toolbar__inference-btn"
+      onClick={onDetectNsfw}
+      disabled={!canInfer || isClassifyingNsfw}
+      title="NSFW 画像判定"
+    >
+      {isClassifyingNsfw ? <><span className="toolbar__spinner" />判定中…</> : <><ShieldIcon />NSFW 判定</>}
+    </button>
+  );
+}
+
+// ─── NSFW 設定パネル ──────────────────────────────────────────
+
+function NsfwModelSettings() {
+  const { nsfwModelPath, nsfwClassNamesPath, saveNsfwConfig } = useStore();
+  const [isOpen, setOpen] = useState(false);
+  const [modelPath, setModelPath] = useState(nsfwModelPath);
+  const [classNamesPath, setClassNamesPath] = useState(nsfwClassNamesPath);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setModelPath(nsfwModelPath); }, [nsfwModelPath]);
+  useEffect(() => { setClassNamesPath(nsfwClassNamesPath); }, [nsfwClassNamesPath]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  const browseModel = async () => {
+    const path = await openDialog({
+      multiple: false, directory: false,
+      filters: [{ name: 'ONNX Model', extensions: ['onnx'] }],
+    });
+    if (typeof path === 'string') setModelPath(path);
+  };
+
+  const browseClassNames = async () => {
+    const path = await openDialog({
+      multiple: false, directory: false,
+      filters: [{ name: 'Text File', extensions: ['txt'] }],
+    });
+    if (typeof path === 'string') setClassNamesPath(path);
+  };
+
+  const handleSave = async () => {
+    await saveNsfwConfig(modelPath, classNamesPath);
+    setOpen(false);
+  };
+
+  return (
+    <div className="face-model-settings" ref={panelRef}>
+      <button
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        title="NSFW 設定"
+      >
+        <GearIcon />
+      </button>
+
+      {isOpen && (
+        <div className="face-model-panel">
+          <p className="face-model-panel__title">NSFW 判定設定</p>
+          <p className="face-model-panel__model-note">
+            対応: [1,2] binary / [1,1] sigmoid / multi-class (classes.txt でキーワード判定)
+          </p>
+
+          <label className="face-model-panel__label">
+            ONNX モデル
+            <span className="face-model-panel__hint">（224×224 分類器）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={modelPath}
+              onChange={e => setModelPath(e.target.value)}
+              placeholder="nsfw_model.onnx のパス"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseModel}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <label className="face-model-panel__label">
+            クラス名ファイル
+            <span className="face-model-panel__hint">（任意 — binary モデルは不要）</span>
+          </label>
+          <div className="face-model-panel__row">
+            <input
+              className="face-model-panel__input"
+              value={classNamesPath}
+              onChange={e => setClassNamesPath(e.target.value)}
+              placeholder="classes.txt のパス（省略可）"
+              onKeyDown={e => e.stopPropagation()}
+            />
+            <button className="face-model-panel__browse" onClick={browseClassNames}>
+              <FolderIcon />
+            </button>
+          </div>
+
+          <div className="face-model-panel__actions">
+            <button className="face-model-panel__save" onClick={handleSave}>
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── NudeNet 設定パネル ────────────────────────────────────────
 
 function NudeNetModelSettings() {
@@ -610,6 +740,14 @@ function BoxIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M3 9h18M9 21V9" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   );
 }

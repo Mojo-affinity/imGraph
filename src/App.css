@@ -1331,3 +1331,54 @@
   font-size: 0.72rem;
   color: var(--text-muted);
 }
+
+/* ── NSFW Section ──────────────────────────────── */
+.nsfw-section {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+}
+
+.nsfw-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.nsfw-label--safe {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.12);
+}
+
+.nsfw-label--nsfw {
+  color: #e05555;
+  background: rgba(224, 85, 85, 0.15);
+}
+
+.nsfw-gauge {
+  height: 6px;
+  background: var(--surface-hover);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 4px;
+}
+
+.nsfw-gauge__bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.nsfw-gauge__bar[data-level="low"]  { background: #4caf50; }
+.nsfw-gauge__bar[data-level="mid"]  { background: #f0b429; }
+.nsfw-gauge__bar[data-level="high"] { background: #e05555; }
+
+.nsfw-score {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  text-align: right;
+}
