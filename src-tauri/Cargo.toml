@@ -1,6 +1,6 @@
 [package]
 name = "im-graph"
-version = "0.3.2"
+version = "0.3.3"
 description = "A multi-platform media viewer with tagging and rating"
 authors = []
 edition = "2021"
@@ -23,6 +23,9 @@ walkdir = "2"
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic", "ndarray"] }
 ndarray = "0.17"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "webp", "tiff"] }
+
+[profile.test]
+opt-level = 3
 
 [profile.release]
 panic = "abort"

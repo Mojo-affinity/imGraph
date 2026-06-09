@@ -25,3 +25,8 @@ dist-ssr
 
 # Tauri
 src-tauri/target/
+
+# テスト用 ONNX / モデル (プロジェクトには含めない)
+*.onnx
+*.pt
+src-tauri/examples/

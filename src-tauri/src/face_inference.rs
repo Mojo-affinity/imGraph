@@ -18,11 +18,39 @@
 ///   入力: [1, 3, 96, 96] float32 RGB [0, 255]
 ///   出力: [1, 3] → [female_prob, male_prob, age/100]
 
+use std::sync::{Mutex, OnceLock};
+
 use image::RgbImage;
 use ndarray::Array4;
 use ort::{session::Session, value::Tensor};
 
 use crate::inference::{iou, next_id, BoundingBox};
+
+// セッションキャッシュ: モデルパスが変わったときだけ再ロード
+struct SessionCache {
+    path: String,
+    session: Session,
+}
+
+static FACE_SESS: OnceLock<Mutex<Option<SessionCache>>> = OnceLock::new();
+static GA_SESS:   OnceLock<Mutex<Option<SessionCache>>> = OnceLock::new();
+
+fn get_session(
+    cell: &'static OnceLock<Mutex<Option<SessionCache>>>,
+    model_path: &str,
+) -> Result<std::sync::MutexGuard<'static, Option<SessionCache>>, String> {
+    let mutex = cell.get_or_init(|| Mutex::new(None));
+    let mut guard = mutex.lock().map_err(|e| format!("lock: {}", e))?;
+    let needs_reload = guard.as_ref().map(|c| c.path != model_path).unwrap_or(true);
+    if needs_reload {
+        let session = Session::builder()
+            .map_err(|e| format!("ORT 初期化: {}", e))?
+            .commit_from_file(model_path)
+            .map_err(|e| format!("モデル読み込み ({}): {}", model_path, e))?;
+        *guard = Some(SessionCache { path: model_path.to_string(), session });
+    }
+    Ok(guard)
+}
 
 // InsightFace ArcFace reference landmarks (112×112 space)
 const ARCFACE_REF_112: [[f32; 2]; 5] = [
@@ -168,14 +196,12 @@ pub fn run_face_detection_onnx(
     }
 
     // ── 3. 顔検出推論 ───────────────────────────────────────
-    let mut face_sess = Session::builder()
-        .map_err(|e| format!("ORT 初期化: {}", e))?
-        .commit_from_file(face_model_path)
-        .map_err(|e| format!("顔検出モデル読み込み: {}", e))?;
+    let mut face_guard = get_session(&FACE_SESS, face_model_path)?;
 
     let face_tensor = Tensor::<f32>::from_array(input)
         .map_err(|e| format!("テンソル構築: {}", e))?;
-    let face_out = face_sess
+    let face_sess = face_guard.as_mut().unwrap();
+    let face_out = face_sess.session
         .run(ort::inputs![face_tensor])
         .map_err(|e| format!("顔検出推論: {}", e))?;
     let face_arr = face_out[0]
@@ -231,23 +257,22 @@ pub fn run_face_detection_onnx(
     }
 
     // ── 5. genderage セッション準備 ─────────────────────────
-    let mut ga_sess = Session::builder()
-        .map_err(|e| format!("ORT 初期化: {}", e))?
-        .commit_from_file(genderage_model_path)
-        .map_err(|e| format!("年齢推定モデル読み込み: {}", e))?;
+    let mut ga_guard = get_session(&GA_SESS, genderage_model_path)?;
+    let ga_sess_ref = ga_guard.as_mut().unwrap();
 
     // モデルの入力 H を動的取得。取れない場合は 96 (buffalo_sc デフォルト)
-    let ga_size: usize = ga_sess
-        .inputs()
-        .first()
-        .and_then(|outlet| {
+    let ga_size: usize = {
+        let inputs = ga_sess_ref.session.inputs();
+        if let Some(outlet) = inputs.first() {
             if let ort::value::ValueType::Tensor { ref shape, .. } = outlet.dtype() {
-                shape.get(2).filter(|&&d| d > 0).map(|&d| d as usize)
+                shape.get(2).filter(|&&d| d > 0).map(|&d| d as usize).unwrap_or(96)
             } else {
-                None
+                96
             }
-        })
-        .unwrap_or(96);
+        } else {
+            96
+        }
+    };
 
     // ── 6. 各顔の年齢・性別推定 ─────────────────────────────
     let ref_scale = ga_size as f32 / 112.0;
@@ -278,7 +303,7 @@ pub fn run_face_detection_onnx(
         // genderage 推論
         let ga_tensor = Tensor::<f32>::from_array(face_arr_warped)
             .map_err(|e| format!("顔テンソル構築: {}", e))?;
-        let ga_out = ga_sess
+        let ga_out = ga_sess_ref.session
             .run(ort::inputs![ga_tensor])
             .map_err(|e| format!("年齢推定推論: {}", e))?;
         let ga_arr = ga_out[0]
@@ -312,6 +337,32 @@ pub fn run_face_detection_onnx(
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_full_pipeline() {
+        let img = "/tmp/test_face.jpg";
+        let det = "/home/ubuntu/models/yolov8n-face.onnx";
+        let ga  = "/home/ubuntu/models/genderage.onnx";
+        if !std::path::Path::new(img).exists()
+            || !std::path::Path::new(det).exists()
+            || !std::path::Path::new(ga).exists()
+        {
+            eprintln!("test assets not found, skipping");
+            return;
+        }
+        let boxes = run_face_detection_onnx(img, det, ga).expect("pipeline failed");
+        eprintln!("Detected {} face(s):", boxes.len());
+        for b in &boxes {
+            eprintln!("  {} conf={:.2} age={:?}  [{:.3},{:.3},{:.3},{:.3}]",
+                b.label, b.confidence, b.age, b.x, b.y, b.width, b.height);
+        }
+        assert!(!boxes.is_empty(), "no faces detected in test image");
+    }
 }
 
 // ─── InsightFace キャッシュからの自動検索 ────────────────────────
