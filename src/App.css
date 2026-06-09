@@ -471,6 +471,14 @@
   margin-left: 4px;
 }
 
+.face-model-panel__model-note {
+  font-size: 0.70rem;
+  color: var(--text-2);
+  margin: 0 0 6px;
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
 .face-model-panel__row {
   display: flex;
   gap: 6px;

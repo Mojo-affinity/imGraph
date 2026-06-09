@@ -5,8 +5,10 @@
 ///   [1, 5<=ch<20, N]: bbox + conf のみ             → 単純クロップ
 ///
 /// 2次モデル (genderage_model_path) は入出力形状から自動判別:
-///   NCHW [1, 3, H, W] + 出力 [1, 3]:  InsightFace genderage.onnx → female/male/age
-///   NHWC [1, H, W, 3] + 出力 [1, 1]:  MobileNetV2 年齢回帰モデル → age only
+///   NCHW [1, 3, H, W] + 出力 [1, 3]:    InsightFace genderage.onnx → female/male/age
+///   NHWC [1, H, W, 3] + 出力 [1, 1]:    MobileNetV2 年齢回帰モデル → age only
+///   NCHW [1, 3, H, W] + 出力×2:         age-gender-prediction-ONNX
+///                                          出力0=age(スカラー or 分布), 出力1=gender[2]
 ///   ※ パス未設定なら顔検出のみ (label="face", age=None)
 
 use image::RgbImage;
@@ -143,11 +145,31 @@ enum SecondaryModelKind {
     Genderage { size: usize },
     /// MobileNetV2 age regression: NHWC [1,H,W,3] [0,1], 出力 [1,1]=age
     AgeRegression { size: usize },
+    /// age-gender-prediction-ONNX: NCHW [1,3,H,W] ImageNet正規化,
+    ///   出力0=age (スカラー or 確率分布), 出力1=gender [female_prob, male_prob]
+    AgeGenderPrediction { size: usize },
 }
+
+// ImageNet mean / std (RGB)
+const IMAGENET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+const IMAGENET_STD:  [f32; 3] = [0.229, 0.224, 0.225];
 
 fn detect_secondary_kind(session: &Session) -> SecondaryModelKind {
     let inputs  = session.inputs();
     let outputs = session.outputs();
+
+    // 出力テンソルが 2 本 → AgeGenderPrediction
+    if outputs.len() >= 2 {
+        let size = inputs.first()
+            .and_then(|o| {
+                if let ort::value::ValueType::Tensor { ref shape, .. } = o.dtype() {
+                    if shape.len() == 4 { let d = shape[2]; if d > 4 { return Some(d as usize); } }
+                }
+                None
+            })
+            .unwrap_or(224);
+        return SecondaryModelKind::AgeGenderPrediction { size: size.max(1) };
+    }
 
     // 出力チャンネル数で種別判定
     let out_ch = outputs.first()
@@ -166,10 +188,8 @@ fn detect_secondary_kind(session: &Session) -> SecondaryModelKind {
                 let d1 = shape[1]; // NCHW: channels (=3), NHWC: height
                 let d3 = shape[3]; // NHWC: channels (=3), NCHW: width
                 if d3 > 0 && d3 <= 4 {
-                    // NHWC: dim3 がチャンネル (3)
                     Some((true, d1.max(0) as usize))
                 } else if d1 > 0 && d1 <= 4 {
-                    // NCHW: dim1 がチャンネル (3)
                     Some((false, shape[2].max(0) as usize))
                 } else {
                     None
@@ -183,6 +203,7 @@ fn detect_secondary_kind(session: &Session) -> SecondaryModelKind {
         _         => SecondaryModelKind::Genderage     { size: size.max(1) },
     }
 }
+
 
 // 単純クロップ版: image クレートの resize を使用（SIMD 最適化済み）
 fn crop_face_simple(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usize) -> Array4<f32> {
@@ -244,6 +265,38 @@ fn crop_face_nhwc(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usiz
         out[[0, y as usize, x as usize, 0]] = p[0] as f32 / 255.0;
         out[[0, y as usize, x as usize, 1]] = p[1] as f32 / 255.0;
         out[[0, y as usize, x as usize, 2]] = p[2] as f32 / 255.0;
+    }
+    out
+}
+
+// NCHW クロップ版: age-gender-prediction-ONNX 用 ImageNet 正規化
+fn crop_face_nchw_imagenet(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usize) -> Array4<f32> {
+    let iw = img.width() as f32;
+    let ih = img.height() as f32;
+    let cx = (x1 + bw / 2.0).clamp(0.0, iw);
+    let cy = (y1 + bh / 2.0).clamp(0.0, ih);
+    let half = (bw.max(bh) / 2.0)
+        .min(cx).min(cy)
+        .min(iw - cx).min(ih - cy)
+        .max(1.0);
+    let crop_x = (cx - half) as u32;
+    let crop_y = (cy - half) as u32;
+    let crop_s = ((half * 2.0) as u32)
+        .min(img.width().saturating_sub(crop_x))
+        .min(img.height().saturating_sub(crop_y))
+        .max(1);
+
+    let crop = image::imageops::crop_imm(img, crop_x, crop_y, crop_s, crop_s);
+    let resized = image::imageops::resize(
+        &*crop, size as u32, size as u32, image::imageops::FilterType::Triangle,
+    );
+
+    let mut out = Array4::<f32>::zeros((1, 3, size, size));
+    for (x, y, p) in resized.enumerate_pixels() {
+        for c in 0..3 {
+            out[[0, c, y as usize, x as usize]] =
+                (p[c] as f32 / 255.0 - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
+        }
     }
     out
 }
@@ -366,8 +419,9 @@ pub fn run_face_detection_onnx(
 
     // ── 6. 各顔の処理 ───────────────────────────────────────
     let ga_size = match &secondary_kind {
-        Some(SecondaryModelKind::Genderage { size })     => *size,
-        Some(SecondaryModelKind::AgeRegression { size }) => *size,
+        Some(SecondaryModelKind::Genderage { size })           => *size,
+        Some(SecondaryModelKind::AgeRegression { size })       => *size,
+        Some(SecondaryModelKind::AgeGenderPrediction { size }) => *size,
         None => 96,
     };
     let ref_scale = ga_size as f32 / 112.0;
@@ -434,6 +488,77 @@ pub fn run_face_detection_onnx(
 
                 let age = ga_arr.first().copied().unwrap_or(0.0).round().max(0.0) as u32;
                 ("face".to_string(), Some(age))
+            },
+            Some(SecondaryModelKind::AgeGenderPrediction { size }) => {
+                // NCHW ImageNet 正規化クロップ
+                let face_input = if let Some(kps) = &det.kps {
+                    let kps_orig: [[f32; 2]; 5] = std::array::from_fn(|k| {
+                        [(kps[k][0] - pad_x) / scale, (kps[k][1] - pad_y) / scale]
+                    });
+                    let params = estimate_similarity(&ref_pts, &kps_orig);
+                    // Umeyama アライン後に ImageNet 正規化
+                    let aligned = warp_face_umeyama(&img_rgb, &params, *size);
+                    // warp_face_umeyama は [0,255] NCHW → ImageNet 正規化に変換
+                    let mut norm = Array4::<f32>::zeros((1, 3, *size, *size));
+                    for c in 0..3 {
+                        for y in 0..*size {
+                            for x in 0..*size {
+                                norm[[0, c, y, x]] =
+                                    (aligned[[0, c, y, x]] / 255.0 - IMAGENET_MEAN[c])
+                                    / IMAGENET_STD[c];
+                            }
+                        }
+                    }
+                    norm
+                } else {
+                    crop_face_nchw_imagenet(&img_rgb, x1, y1, bw, bh, *size)
+                };
+
+                let ga_sess = ga_guard.as_mut().unwrap().as_mut().unwrap();
+                let ga_tensor = Tensor::<f32>::from_array(face_input)
+                    .map_err(|e| format!("顔テンソル構築: {}", e))?;
+                let ga_out = ga_sess.session
+                    .run(ort::inputs![ga_tensor])
+                    .map_err(|e| format!("age-gender 推論: {}", e))?;
+
+                // 出力0: age（スカラー or 確率分布）
+                let age_arr = ga_out[0]
+                    .try_extract_array::<f32>()
+                    .map_err(|e| format!("age 出力取得: {}", e))?;
+                let age_flat: Vec<f32> = age_arr.iter().cloned().collect();
+                let age = if age_flat.len() == 1 {
+                    // スカラー: そのまま使用（0〜100 or 0〜1 を判定）
+                    let v = age_flat[0];
+                    if v <= 1.0 { (v * 100.0).round() as u32 } else { v.round() as u32 }
+                } else {
+                    // 確率分布: 加重期待値（インデックス = 年齢）
+                    let sum: f32 = age_flat.iter().sum();
+                    if sum > 0.0 {
+                        let exp: f32 = age_flat.iter().enumerate()
+                            .map(|(i, &p)| i as f32 * p)
+                            .sum();
+                        (exp / sum).round() as u32
+                    } else {
+                        0
+                    }
+                };
+
+                // 出力1: gender [female_prob, male_prob]（慣習: index0=female, index1=male）
+                let gender_label = if ga_out.len() >= 2 {
+                    let g_arr = ga_out[1]
+                        .try_extract_array::<f32>()
+                        .map_err(|e| format!("gender 出力取得: {}", e))?;
+                    let g: Vec<f32> = g_arr.iter().cloned().collect();
+                    if g.len() >= 2 {
+                        if g[1] > g[0] { "male" } else { "female" }
+                    } else {
+                        "face"
+                    }
+                } else {
+                    "face"
+                };
+
+                (gender_label.to_string(), Some(age))
             },
             None => ("face".to_string(), None),
         };

@@ -422,12 +422,15 @@ function FaceModelSettings() {
             年齢・性別モデル
             <span className="face-model-panel__hint">（任意 — 空欄で顔検出のみ）</span>
           </label>
+          <p className="face-model-panel__model-note">
+            対応: genderage.onnx / age-gender-prediction-ONNX / MobileNetV2 age regression
+          </p>
           <div className="face-model-panel__row">
             <input
               className="face-model-panel__input"
               value={gaPath}
               onChange={e => setGaPath(e.target.value)}
-              placeholder="genderage.onnx のパス"
+              placeholder="genderage.onnx または age_gender.onnx のパス"
               onKeyDown={e => e.stopPropagation()}
             />
             <button className="face-model-panel__browse" onClick={browseGa} title="参照">
