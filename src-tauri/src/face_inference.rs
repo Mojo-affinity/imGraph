@@ -1,12 +1,12 @@
-/// YOLOv8-face ONNX + (オプション) genderage.onnx による顔検出・年齢推定
+/// YOLOv8-face ONNX + (オプション) 2次モデルによる顔検出・年齢推定
 ///
-/// 対応出力形状:
+/// 顔検出モデル出力形状:
 ///   [1, ch>=20, N]: YOLOv8-face (bbox + 5 keypoints) → Umeyama 顔アライン
 ///   [1, 5<=ch<20, N]: bbox + conf のみ             → 単純クロップ
 ///
-/// genderage.onnx (InsightFace buffalo_l/buffalo_sc):
-///   入力: [1, 3, 96, 96] float32 RGB [0, 255]
-///   出力: [1, 3] → [female_prob, male_prob, age/100]
+/// 2次モデル (genderage_model_path) は入出力形状から自動判別:
+///   NCHW [1, 3, H, W] + 出力 [1, 3]:  InsightFace genderage.onnx → female/male/age
+///   NHWC [1, H, W, 3] + 出力 [1, 1]:  MobileNetV2 年齢回帰モデル → age only
 ///   ※ パス未設定なら顔検出のみ (label="face", age=None)
 
 use image::RgbImage;
@@ -136,6 +136,54 @@ fn warp_face_umeyama(img: &RgbImage, params: &[f64; 4], size: usize) -> Array4<f
     out
 }
 
+// ─── 2次モデル自動判別 ────────────────────────────────────────────
+
+enum SecondaryModelKind {
+    /// InsightFace genderage: NCHW [1,3,H,W] [0,255], 出力 [1,3]=[f,m,age/100]
+    Genderage { size: usize },
+    /// MobileNetV2 age regression: NHWC [1,H,W,3] [0,1], 出力 [1,1]=age
+    AgeRegression { size: usize },
+}
+
+fn detect_secondary_kind(session: &Session) -> SecondaryModelKind {
+    let inputs  = session.inputs();
+    let outputs = session.outputs();
+
+    // 出力チャンネル数で種別判定
+    let out_ch = outputs.first()
+        .and_then(|o| {
+            if let ort::value::ValueType::Tensor { ref shape, .. } = o.dtype() {
+                shape.last().copied().filter(|&d| d > 0).map(|d| d as usize)
+            } else { None }
+        })
+        .unwrap_or(3);
+
+    // 入力形状から NHWC/NCHW とサイズを判定
+    let (is_nhwc, size) = inputs.first()
+        .and_then(|o| {
+            if let ort::value::ValueType::Tensor { ref shape, .. } = o.dtype() {
+                if shape.len() != 4 { return None; }
+                let d1 = shape[1]; // NCHW: channels (=3), NHWC: height
+                let d3 = shape[3]; // NHWC: channels (=3), NCHW: width
+                if d3 > 0 && d3 <= 4 {
+                    // NHWC: dim3 がチャンネル (3)
+                    Some((true, d1.max(0) as usize))
+                } else if d1 > 0 && d1 <= 4 {
+                    // NCHW: dim1 がチャンネル (3)
+                    Some((false, shape[2].max(0) as usize))
+                } else {
+                    None
+                }
+            } else { None }
+        })
+        .unwrap_or((false, 96));
+
+    match (is_nhwc, out_ch) {
+        (true, 1) => SecondaryModelKind::AgeRegression { size: size.max(1) },
+        _         => SecondaryModelKind::Genderage     { size: size.max(1) },
+    }
+}
+
 // 単純クロップ版: image クレートの resize を使用（SIMD 最適化済み）
 fn crop_face_simple(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usize) -> Array4<f32> {
     let iw = img.width() as f32;
@@ -164,6 +212,38 @@ fn crop_face_simple(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: us
         out[[0, 0, y as usize, x as usize]] = p[0] as f32;
         out[[0, 1, y as usize, x as usize]] = p[1] as f32;
         out[[0, 2, y as usize, x as usize]] = p[2] as f32;
+    }
+    out
+}
+
+// NHWC クロップ版: age regression モデル用 [0,1] 正規化
+fn crop_face_nhwc(img: &RgbImage, x1: f32, y1: f32, bw: f32, bh: f32, size: usize) -> Array4<f32> {
+    let iw = img.width() as f32;
+    let ih = img.height() as f32;
+    let cx = (x1 + bw / 2.0).clamp(0.0, iw);
+    let cy = (y1 + bh / 2.0).clamp(0.0, ih);
+    let half = (bw.max(bh) / 2.0)
+        .min(cx).min(cy)
+        .min(iw - cx).min(ih - cy)
+        .max(1.0);
+    let crop_x = (cx - half) as u32;
+    let crop_y = (cy - half) as u32;
+    let crop_s = ((half * 2.0) as u32)
+        .min(img.width().saturating_sub(crop_x))
+        .min(img.height().saturating_sub(crop_y))
+        .max(1);
+
+    let crop = image::imageops::crop_imm(img, crop_x, crop_y, crop_s, crop_s);
+    let resized = image::imageops::resize(
+        &*crop, size as u32, size as u32, image::imageops::FilterType::Triangle,
+    );
+
+    // NHWC: [1, size, size, 3], [0, 1] 正規化
+    let mut out = Array4::<f32>::zeros((1, size, size, 3));
+    for (x, y, p) in resized.enumerate_pixels() {
+        out[[0, y as usize, x as usize, 0]] = p[0] as f32 / 255.0;
+        out[[0, y as usize, x as usize, 1]] = p[1] as f32 / 255.0;
+        out[[0, y as usize, x as usize, 2]] = p[2] as f32 / 255.0;
     }
     out
 }
@@ -270,26 +350,26 @@ pub fn run_face_detection_onnx(
         }
     }
 
-    // ── 5. genderage セッション準備 (オプション) ────────────
-    let use_genderage = !genderage_model_path.is_empty();
+    // ── 5. 2次モデルセッション準備 (オプション) ─────────────
+    let use_secondary = !genderage_model_path.is_empty();
 
-    let (ga_size, mut ga_guard) = if use_genderage {
-        let mut guard = get_session(&GA_SESS, genderage_model_path)?;
-        let size: usize = {
+    let (secondary_kind, mut ga_guard) = if use_secondary {
+        let guard = get_session(&GA_SESS, genderage_model_path)?;
+        let kind = {
             let sess = guard.as_ref().unwrap();
-            let inputs = sess.session.inputs();
-            if let Some(outlet) = inputs.first() {
-                if let ort::value::ValueType::Tensor { ref shape, .. } = outlet.dtype() {
-                    shape.get(2).filter(|&&d| d > 0).map(|&d| d as usize).unwrap_or(96)
-                } else { 96 }
-            } else { 96 }
+            detect_secondary_kind(&sess.session)
         };
-        (size, Some(guard))
+        (Some(kind), Some(guard))
     } else {
-        (96, None)
+        (None, None)
     };
 
     // ── 6. 各顔の処理 ───────────────────────────────────────
+    let ga_size = match &secondary_kind {
+        Some(SecondaryModelKind::Genderage { size })     => *size,
+        Some(SecondaryModelKind::AgeRegression { size }) => *size,
+        None => 96,
+    };
     let ref_scale = ga_size as f32 / 112.0;
     let ref_pts: [[f32; 2]; 5] =
         std::array::from_fn(|k| [ARCFACE_REF_112[k][0] * ref_scale, ARCFACE_REF_112[k][1] * ref_scale]);
@@ -305,40 +385,57 @@ pub fn run_face_detection_onnx(
         let bw  = det.w / scale;
         let bh  = det.h / scale;
 
-        let (label, age) = if use_genderage {
-            let face_input = if let Some(kps) = &det.kps {
-                // Umeyama アライン
-                let kps_orig: [[f32; 2]; 5] = std::array::from_fn(|k| {
-                    [(kps[k][0] - pad_x) / scale, (kps[k][1] - pad_y) / scale]
-                });
-                let params = estimate_similarity(&ref_pts, &kps_orig);
-                warp_face_umeyama(&img_rgb, &params, ga_size)
-            } else {
-                // 単純クロップ
-                crop_face_simple(&img_rgb, x1, y1, bw, bh, ga_size)
-            };
+        let (label, age) = match &secondary_kind {
+            Some(SecondaryModelKind::Genderage { size }) => {
+                let ga_size_loc = *size;
+                let face_input = if let Some(kps) = &det.kps {
+                    let kps_orig: [[f32; 2]; 5] = std::array::from_fn(|k| {
+                        [(kps[k][0] - pad_x) / scale, (kps[k][1] - pad_y) / scale]
+                    });
+                    let params = estimate_similarity(&ref_pts, &kps_orig);
+                    warp_face_umeyama(&img_rgb, &params, ga_size_loc)
+                } else {
+                    crop_face_simple(&img_rgb, x1, y1, bw, bh, ga_size_loc)
+                };
 
-            let ga_sess = ga_guard.as_mut().unwrap().as_mut().unwrap();
-            let ga_tensor = Tensor::<f32>::from_array(face_input)
-                .map_err(|e| format!("顔テンソル構築: {}", e))?;
-            let ga_out = ga_sess.session
-                .run(ort::inputs![ga_tensor])
-                .map_err(|e| format!("年齢推定推論: {}", e))?;
-            let ga_arr = ga_out[0]
-                .try_extract_array::<f32>()
-                .map_err(|e| format!("年齢推定出力: {}", e))?;
+                let ga_sess = ga_guard.as_mut().unwrap().as_mut().unwrap();
+                let ga_tensor = Tensor::<f32>::from_array(face_input)
+                    .map_err(|e| format!("顔テンソル構築: {}", e))?;
+                let ga_out = ga_sess.session
+                    .run(ort::inputs![ga_tensor])
+                    .map_err(|e| format!("genderage 推論: {}", e))?;
+                let ga_arr = ga_out[0]
+                    .try_extract_array::<f32>()
+                    .map_err(|e| format!("genderage 出力: {}", e))?;
 
-            if ga_arr.shape().get(1).copied().unwrap_or(0) >= 3 {
-                let female = ga_arr[[0, 0]];
-                let male   = ga_arr[[0, 1]];
-                let age    = (ga_arr[[0, 2]] * 100.0).round() as u32;
-                let gender = if male > female { "male" } else { "female" };
-                (gender.to_string(), Some(age))
-            } else {
-                ("face".to_string(), None)
-            }
-        } else {
-            ("face".to_string(), None)
+                if ga_arr.shape().get(1).copied().unwrap_or(0) >= 3 {
+                    let female = ga_arr[[0, 0]];
+                    let male   = ga_arr[[0, 1]];
+                    let age    = (ga_arr[[0, 2]] * 100.0).round() as u32;
+                    let gender = if male > female { "male" } else { "female" };
+                    (gender.to_string(), Some(age))
+                } else {
+                    ("face".to_string(), None)
+                }
+            },
+            Some(SecondaryModelKind::AgeRegression { size }) => {
+                // NHWC [0,1] クロップ → 年齢回帰
+                let face_input = crop_face_nhwc(&img_rgb, x1, y1, bw, bh, *size);
+
+                let ga_sess = ga_guard.as_mut().unwrap().as_mut().unwrap();
+                let ga_tensor = Tensor::<f32>::from_array(face_input)
+                    .map_err(|e| format!("顔テンソル構築: {}", e))?;
+                let ga_out = ga_sess.session
+                    .run(ort::inputs![ga_tensor])
+                    .map_err(|e| format!("年齢回帰推論: {}", e))?;
+                let ga_arr = ga_out[0]
+                    .try_extract_array::<f32>()
+                    .map_err(|e| format!("年齢回帰出力: {}", e))?;
+
+                let age = ga_arr.first().copied().unwrap_or(0.0).round().max(0.0) as u32;
+                ("face".to_string(), Some(age))
+            },
+            None => ("face".to_string(), None),
         };
 
         let nx = (x1 / orig_w).clamp(0.0, 1.0);
@@ -410,10 +507,31 @@ mod tests {
             eprintln!("test assets not found, skipping");
             return;
         }
-        // genderage なしで実行
         let boxes = run_face_detection_onnx(img, det, "").expect("detect-only failed");
         eprintln!("Detect-only: {} face(s)", boxes.len());
         assert!(!boxes.is_empty());
         assert!(boxes.iter().all(|b| b.age.is_none()));
+    }
+
+    #[test]
+    fn test_age_regression() {
+        let img = "/tmp/test_face.jpg";
+        let det = "/home/ubuntu/models/yolov8n-face.onnx";
+        let age = "/home/ubuntu/models/age_regression.onnx";
+        if !std::path::Path::new(img).exists()
+            || !std::path::Path::new(det).exists()
+            || !std::path::Path::new(age).exists()
+        {
+            eprintln!("test assets not found, skipping");
+            return;
+        }
+        let boxes = run_face_detection_onnx(img, det, age).expect("age-regression failed");
+        eprintln!("Age-regression: {} face(s):", boxes.len());
+        for b in &boxes {
+            eprintln!("  label={} conf={:.2} age={:?}", b.label, b.confidence, b.age);
+        }
+        assert!(!boxes.is_empty());
+        assert!(boxes.iter().all(|b| b.age.is_some()), "age should be set for all faces");
+        assert!(boxes.iter().all(|b| b.label == "face"), "label should be 'face' for age-regression model");
     }
 }
