@@ -103,6 +103,18 @@ function App() {
         return;
       }
 
+      // 推論ショートカット（画像選択中かつ推論・スキャン中でない時のみ）
+      if (store.selectedFile?.media_type === 'image' && !store.isScanning && !store.isInferring) {
+        const path = store.selectedFile.path;
+        if (e.key.toLowerCase() === 'd') { store.runInference(path, 'object'); return; }
+        if (e.key.toLowerCase() === 'f') { store.runInference(path, 'face'); return; }
+        if (e.key.toLowerCase() === 'b') { store.runInference(path, 'nudenet'); return; }
+        if (e.key.toLowerCase() === 'n' && !store.isClassifyingNsfw) {
+          store.runNsfwClassification(path);
+          return;
+        }
+      }
+
       // ショートカット一覧
       if (e.key === '?') {
         setShowShortcuts(v => !v);
@@ -119,6 +131,8 @@ function App() {
     store.selectedBoxId, store.removeBoundingBox, store.setSelectedBoxId,
     store.toggleAnnotationMode, store.toggleLogWindow,
     store.saveAnnotation, store.updateMetadata,
+    store.runInference, store.runNsfwClassification,
+    store.isInferring, store.isScanning, store.isClassifyingNsfw,
     showShortcuts,
   ]);
 
@@ -198,6 +212,10 @@ const SHORTCUTS: { keys: string[]; desc: string }[] = [
   { keys: ['End'],               desc: '最後のファイル' },
   { keys: ['1', '2', '3', '4', '5'], desc: 'レーティング設定' },
   { keys: ['0'],                 desc: 'ズームリセット' },
+  { keys: ['D'],                 desc: '物体検出' },
+  { keys: ['F'],                 desc: '顔検出' },
+  { keys: ['B'],                 desc: '部位検出 (NudeNet)' },
+  { keys: ['N'],                 desc: 'NSFW 判定' },
   { keys: ['A'],                 desc: 'アノテーションモード切替' },
   { keys: ['Delete', 'BS'],      desc: '選択中 BB を削除' },
   { keys: ['Esc'],               desc: 'BB 選択解除' },
