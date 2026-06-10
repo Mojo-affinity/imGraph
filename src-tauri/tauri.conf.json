@@ -1,6 +1,6 @@
 {
   "productName": "imGraph",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "identifier": "com.imgraph.app",
   "build": {
     "beforeDevCommand": "npm run dev",
