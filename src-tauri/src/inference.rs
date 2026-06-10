@@ -48,26 +48,17 @@ pub async fn run_object_detection(
     image_path: &str,
     model_path: &str,
     class_names_path: &str,
+    conf_threshold: f32,
 ) -> Result<Vec<BoundingBox>, String> {
     validate_image_path(image_path)?;
-
-    if model_path.is_empty() {
-        return Err(
-            "物体検出モデルが設定されていません。\
-             Toolbar の ⚙ から ONNX モデルパスを設定してください。"
-                .to_string(),
-        );
-    }
-    if !Path::new(model_path).exists() {
-        return Err(format!("モデルが見つかりません: {}", model_path));
-    }
+    validate_model_path(model_path, "物体検出")?;
 
     let image_path = image_path.to_string();
     let model_path = model_path.to_string();
     let class_names_path = class_names_path.to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        yolo_detect(&image_path, &model_path, &class_names_path, 0.25)
+        yolo_detect(&image_path, &model_path, &class_names_path, conf_threshold)
     })
     .await
     .map_err(|e| format!("タスク実行エラー: {}", e))?
@@ -80,17 +71,7 @@ pub async fn run_nudenet_detection(
     conf_threshold: f32,
 ) -> Result<Vec<BoundingBox>, String> {
     validate_image_path(image_path)?;
-
-    if model_path.is_empty() {
-        return Err(
-            "NudeNet モデルが設定されていません。\
-             Toolbar の ⚙ から 640m.onnx のパスを設定してください。"
-                .to_string(),
-        );
-    }
-    if !Path::new(model_path).exists() {
-        return Err(format!("モデルが見つかりません: {}", model_path));
-    }
+    validate_model_path(model_path, "NudeNet")?;
 
     let image_path = image_path.to_string();
     let model_path = model_path.to_string();
@@ -396,6 +377,19 @@ fn validate_image_path(image_path: &str) -> Result<(), String> {
     }
     if !path.is_file() {
         return Err(format!("ファイルではありません: {}", image_path));
+    }
+    Ok(())
+}
+
+fn validate_model_path(model_path: &str, model_name: &str) -> Result<(), String> {
+    if model_path.is_empty() {
+        return Err(format!(
+            "{}モデルが設定されていません。Toolbar の ⚙ からモデルパスを設定してください。",
+            model_name
+        ));
+    }
+    if !Path::new(model_path).exists() {
+        return Err(format!("モデルが見つかりません: {}", model_path));
     }
     Ok(())
 }

@@ -52,6 +52,8 @@ struct ModelConfig {
     object_model_path: String,
     #[serde(default)]
     object_class_names_path: String,
+    #[serde(default = "default_object_conf")]
+    object_conf_threshold: f32,
     // Rust ONNX 顔検出 (空の場合は Python fallback)
     #[serde(default)]
     face_det_model_path: String,
@@ -70,6 +72,7 @@ struct ModelConfig {
 }
 
 fn default_nudenet_conf() -> f32 { 0.2 }
+fn default_object_conf()  -> f32 { 0.25 }
 
 fn model_config_path() -> PathBuf {
     let home = std::env::var("HOME")
@@ -295,12 +298,13 @@ async fn detect_objects(
     image_path: String,
     model_path: String,
     class_names_path: String,
+    conf_threshold: f32,
 ) -> Result<Vec<inference::BoundingBox>, String> {
     let fname = std::path::Path::new(&image_path)
         .file_name().and_then(|n| n.to_str()).unwrap_or(&image_path).to_string();
-    emit_log(&app, "info", format!("[物体検出] 開始: {}", fname));
+    emit_log(&app, "info", format!("[物体検出] 開始: {} (閾値={:.2})", fname, conf_threshold));
 
-    match inference::run_object_detection(&image_path, &model_path, &class_names_path).await {
+    match inference::run_object_detection(&image_path, &model_path, &class_names_path, conf_threshold).await {
         Ok(boxes) => {
             emit_log(&app, "info", format!("[物体検出] 完了: {}個検出", boxes.len()));
             Ok(boxes)

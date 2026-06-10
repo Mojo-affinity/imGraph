@@ -18,6 +18,7 @@ interface ToolbarProps {
   onDetectFaces: () => void;
   onDetectNudenet: () => void;
   onDetectNsfw: () => void;
+  onBatchNudenet: () => void;
 }
 
 export function Toolbar({
@@ -34,6 +35,7 @@ export function Toolbar({
   onDetectFaces,
   onDetectNudenet,
   onDetectNsfw,
+  onBatchNudenet,
 }: ToolbarProps) {
   const [saved, setSaved] = useState(false);
 
@@ -75,6 +77,11 @@ export function Toolbar({
       )}
 
       <div className="toolbar__spacer" />
+
+      {/* 一括部位推定→保存 */}
+      {currentDir && (
+        <BatchNudenetButton onBatchNudenet={onBatchNudenet} isScanning={isScanning} />
+      )}
 
       {/* ログウィンドウトグル */}
       <LogToggleButton />
@@ -205,14 +212,16 @@ function AnnotationModeToggle() {
 // ─── 物体検出モデル設定パネル ───────────────────────────────────
 
 function ObjectModelSettings() {
-  const { objectModelPath, objectClassNamesPath, saveObjectModelConfig } = useStore();
+  const { objectModelPath, objectClassNamesPath, objectConfThreshold, saveObjectModelConfig } = useStore();
   const [isOpen, setOpen] = useState(false);
   const [modelPath, setModelPath] = useState(objectModelPath);
   const [classNamesPath, setClassNamesPath] = useState(objectClassNamesPath);
+  const [confThreshold, setConfThreshold] = useState(objectConfThreshold);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setModelPath(objectModelPath); }, [objectModelPath]);
   useEffect(() => { setClassNamesPath(objectClassNamesPath); }, [objectClassNamesPath]);
+  useEffect(() => { setConfThreshold(objectConfThreshold); }, [objectConfThreshold]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -244,7 +253,7 @@ function ObjectModelSettings() {
   };
 
   const handleSave = async () => {
-    await saveObjectModelConfig(modelPath, classNamesPath);
+    await saveObjectModelConfig(modelPath, classNamesPath, confThreshold);
     setOpen(false);
   };
 
@@ -295,6 +304,18 @@ function ObjectModelSettings() {
               <FolderIcon />
             </button>
           </div>
+
+          <label className="face-model-panel__label">
+            信頼度閾値: <strong>{confThreshold.toFixed(2)}</strong>
+            <span className="face-model-panel__hint">（推奨: 0.20〜0.35）</span>
+          </label>
+          <input
+            className="nudenet-conf-slider"
+            type="range"
+            min={0.05} max={0.75} step={0.05}
+            value={confThreshold}
+            onChange={e => setConfThreshold(Number(e.target.value))}
+          />
 
           <div className="face-model-panel__actions">
             <button className="face-model-panel__save" onClick={handleSave}>
@@ -820,6 +841,55 @@ function TerminalIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
+// ─── 一括部位推定ボタン ────────────────────────────────────────
+
+function BatchNudenetButton({ onBatchNudenet, isScanning }: { onBatchNudenet: () => void; isScanning: boolean }) {
+  const isBatchNudenet       = useStore(s => s.isBatchNudenet);
+  const batchNudenetProgress = useStore(s => s.batchNudenetProgress);
+  const nudenetModelPath     = useStore(s => s.nudenetModelPath);
+  const files                = useStore(s => s.files);
+  const imageCount = files.filter(f => f.media_type === 'image').length;
+
+  const disabled = isBatchNudenet || isScanning || !nudenetModelPath || imageCount === 0;
+
+  if (isBatchNudenet && batchNudenetProgress) {
+    return (
+      <button className="toolbar__batch-btn toolbar__batch-btn--running" disabled>
+        <span className="toolbar__spinner" />
+        {batchNudenetProgress.done}/{batchNudenetProgress.total} 処理中…
+      </button>
+    );
+  }
+
+  return (
+    <button
+      className="toolbar__batch-btn"
+      onClick={onBatchNudenet}
+      disabled={disabled}
+      title={
+        !nudenetModelPath
+          ? 'NudeNet モデルを設定してください'
+          : imageCount === 0
+            ? '画像ファイルがありません'
+            : `${imageCount}枚すべてに部位推定を実行して学習データ保存`
+      }
+    >
+      <BatchIcon />
+      全画像 部位推定→保存
+    </button>
+  );
+}
+
+function BatchIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
     </svg>
   );
 }

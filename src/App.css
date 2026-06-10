@@ -98,6 +98,35 @@
   color: #2ecc71;
 }
 
+.toolbar__batch-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toolbar__batch-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+.toolbar__batch-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.toolbar__batch-btn--running {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
 .toolbar__info {
   display: flex;
   align-items: center;

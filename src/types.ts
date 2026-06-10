@@ -58,6 +58,7 @@ export interface ModelConfig {
   face_model_dir: string;
   object_model_path: string;
   object_class_names_path: string;
+  object_conf_threshold: number;
   // Rust ONNX 顔検出 (空の場合は Python fallback)
   face_det_model_path: string;
   face_genderage_model_path: string;

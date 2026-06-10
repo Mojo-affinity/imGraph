@@ -160,6 +160,10 @@ function App() {
     }
   };
 
+  const handleBatchNudenet = () => {
+    store.runBatchNudenetAndSave();
+  };
+
   return (
     <div className="app">
       <Toolbar
@@ -176,6 +180,7 @@ function App() {
         onDetectFaces={handleDetectFaces}
         onDetectNudenet={handleDetectNudenet}
         onDetectNsfw={handleDetectNsfw}
+        onBatchNudenet={handleBatchNudenet}
       />
       {store.error && (
         <div className="error-banner">{store.error}</div>

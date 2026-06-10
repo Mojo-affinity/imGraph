@@ -15,6 +15,28 @@ import type {
   LogEntry,
 } from '../types';
 
+// ─── ModelConfig ヘルパー ─────────────────────────────────────
+
+function currentModelConfig(s: StoreState): ModelConfig {
+  return {
+    face_script_path: s.faceScriptPath,
+    face_model_dir: s.faceModelDir,
+    object_model_path: s.objectModelPath,
+    object_class_names_path: s.objectClassNamesPath,
+    object_conf_threshold: s.objectConfThreshold,
+    face_det_model_path: s.faceDetModelPath,
+    face_genderage_model_path: s.faceGenderageModelPath,
+    nudenet_model_path: s.nudenetModelPath,
+    nudenet_conf_threshold: s.nudenetConfThreshold,
+    nsfw_model_path: s.nsfwModelPath,
+    nsfw_class_names_path: s.nsfwClassNamesPath,
+  };
+}
+
+async function persistModelConfig(config: ModelConfig): Promise<void> {
+  await invoke('save_model_config', { config });
+}
+
 // ─── イベントリスナー管理 (ストア外で保持) ───────────────────
 let _unlistenFns: UnlistenFn[] = [];
 const stopListeners = () => {
@@ -69,6 +91,7 @@ interface StoreState {
   faceModelDir: string;
   objectModelPath: string;
   objectClassNamesPath: string;
+  objectConfThreshold: number;
   faceDetModelPath: string;
   faceGenderageModelPath: string;
   nudenetModelPath: string;
@@ -122,12 +145,17 @@ interface StoreState {
   // ── モデル設定 ────────────────────────────────────────────
   loadModelConfig: () => Promise<void>;
   saveModelConfig: (scriptPath: string, modelDir: string) => Promise<void>;
-  saveObjectModelConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
+  saveObjectModelConfig: (modelPath: string, classNamesPath: string, confThreshold: number) => Promise<void>;
   loadBundledScripts: () => Promise<void>;
   saveFaceOnnxConfig: (detModelPath: string, genderageModelPath: string) => Promise<void>;
   saveNudenetConfig: (modelPath: string, confThreshold: number) => Promise<void>;
   saveNsfwConfig: (modelPath: string, classNamesPath: string) => Promise<void>;
   runNsfwClassification: (imagePath: string) => Promise<void>;
+
+  // ── 一括処理 ──────────────────────────────────────────────
+  isBatchNudenet: boolean;
+  batchNudenetProgress: { done: number; total: number } | null;
+  runBatchNudenetAndSave: () => Promise<void>;
 
   // ── UI モード ─────────────────────────────────────────────
   toggleAnnotationMode: () => void;
@@ -163,6 +191,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   faceModelDir: '',
   objectModelPath: '',
   objectClassNamesPath: '',
+  objectConfThreshold: 0.25,
   faceDetModelPath: '',
   faceGenderageModelPath: '',
   nudenetModelPath: '',
@@ -176,6 +205,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   annotationMode: true,
   appLogs: [],
   showLogWindow: false,
+  isBatchNudenet: false,
+  batchNudenetProgress: null,
 
   // ── ファイル操作 ──────────────────────────────────────────
   openDirectory: async () => {
@@ -337,11 +368,12 @@ export const useStore = create<StoreState>()((set, get) => ({
           confThreshold: nudenetConfThreshold,
         });
       } else {
-        const { objectModelPath, objectClassNamesPath } = get();
+        const { objectModelPath, objectClassNamesPath, objectConfThreshold } = get();
         boxes = await invoke<BoundingBox[]>('detect_objects', {
           imagePath,
           modelPath: objectModelPath,
           classNamesPath: objectClassNamesPath,
+          confThreshold: objectConfThreshold,
         });
       }
       set({ boundingBoxes: boxes, isInferring: false });
@@ -391,6 +423,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         faceModelDir: config.face_model_dir,
         objectModelPath: config.object_model_path,
         objectClassNamesPath: config.object_class_names_path,
+        objectConfThreshold: config.object_conf_threshold ?? 0.25,
         faceDetModelPath: config.face_det_model_path,
         faceGenderageModelPath: config.face_genderage_model_path,
         nudenetModelPath: config.nudenet_model_path,
@@ -404,22 +437,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveModelConfig: async (scriptPath, modelDir) => {
-    const { objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath, nudenetModelPath, nudenetConfThreshold, nsfwModelPath, nsfwClassNamesPath } = get();
     try {
-      await invoke('save_model_config', {
-        config: {
-          face_script_path: scriptPath,
-          face_model_dir: modelDir,
-          object_model_path: objectModelPath,
-          object_class_names_path: objectClassNamesPath,
-          face_det_model_path: faceDetModelPath,
-          face_genderage_model_path: faceGenderageModelPath,
-          nudenet_model_path: nudenetModelPath,
-          nudenet_conf_threshold: nudenetConfThreshold,
-          nsfw_model_path: nsfwModelPath,
-          nsfw_class_names_path: nsfwClassNamesPath,
-        },
-      });
+      await persistModelConfig({ ...currentModelConfig(get()), face_script_path: scriptPath, face_model_dir: modelDir });
       set({ faceScriptPath: scriptPath, faceModelDir: modelDir });
     } catch (e) {
       set({ error: String(e) });
@@ -456,6 +475,38 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
+  runBatchNudenetAndSave: async () => {
+    const { files, nudenetModelPath, nudenetConfThreshold, appendAppLog } = get();
+    if (!nudenetModelPath) {
+      set({ error: 'NudeNet モデルが設定されていません' });
+      return;
+    }
+    const imageFiles = files.filter(f => f.media_type === 'image');
+    if (imageFiles.length === 0) return;
+
+    set({ isBatchNudenet: true, batchNudenetProgress: { done: 0, total: imageFiles.length }, error: null });
+    appendAppLog({ level: 'info', message: `[一括部位推定] 開始: ${imageFiles.length}枚` });
+
+    let done = 0;
+    for (const file of imageFiles) {
+      try {
+        const boxes = await invoke<BoundingBox[]>('detect_nudenet', {
+          imagePath: file.path,
+          modelPath: nudenetModelPath,
+          confThreshold: nudenetConfThreshold,
+        });
+        await invoke('save_annotation', { imagePath: file.path, boxes });
+      } catch (e) {
+        appendAppLog({ level: 'error', message: `[一括部位推定] ${file.name}: ${String(e)}` });
+      }
+      done++;
+      set({ batchNudenetProgress: { done, total: imageFiles.length } });
+    }
+
+    appendAppLog({ level: 'info', message: `[一括部位推定] 完了: ${imageFiles.length}枚処理` });
+    set({ isBatchNudenet: false, batchNudenetProgress: null });
+  },
+
   toggleAnnotationMode: () => set(s => ({ annotationMode: !s.annotationMode })),
 
   appendAppLog: ({ level, message }) =>
@@ -471,46 +522,18 @@ export const useStore = create<StoreState>()((set, get) => ({
   toggleLogWindow: () => set(s => ({ showLogWindow: !s.showLogWindow })),
   setShowLogWindow: (v) => set({ showLogWindow: v }),
 
-  saveObjectModelConfig: async (modelPath, classNamesPath) => {
-    const { faceScriptPath, faceModelDir, faceDetModelPath, faceGenderageModelPath, nudenetModelPath, nudenetConfThreshold, nsfwModelPath, nsfwClassNamesPath } = get();
+  saveObjectModelConfig: async (modelPath, classNamesPath, confThreshold) => {
     try {
-      await invoke('save_model_config', {
-        config: {
-          face_script_path: faceScriptPath,
-          face_model_dir: faceModelDir,
-          object_model_path: modelPath,
-          object_class_names_path: classNamesPath,
-          face_det_model_path: faceDetModelPath,
-          face_genderage_model_path: faceGenderageModelPath,
-          nudenet_model_path: nudenetModelPath,
-          nudenet_conf_threshold: nudenetConfThreshold,
-          nsfw_model_path: nsfwModelPath,
-          nsfw_class_names_path: nsfwClassNamesPath,
-        },
-      });
-      set({ objectModelPath: modelPath, objectClassNamesPath: classNamesPath });
+      await persistModelConfig({ ...currentModelConfig(get()), object_model_path: modelPath, object_class_names_path: classNamesPath, object_conf_threshold: confThreshold });
+      set({ objectModelPath: modelPath, objectClassNamesPath: classNamesPath, objectConfThreshold: confThreshold });
     } catch (e) {
       set({ error: String(e) });
     }
   },
 
   saveFaceOnnxConfig: async (detModelPath, genderageModelPath) => {
-    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath, nudenetModelPath, nudenetConfThreshold, nsfwModelPath, nsfwClassNamesPath } = get();
     try {
-      await invoke('save_model_config', {
-        config: {
-          face_script_path: faceScriptPath,
-          face_model_dir: faceModelDir,
-          object_model_path: objectModelPath,
-          object_class_names_path: objectClassNamesPath,
-          face_det_model_path: detModelPath,
-          face_genderage_model_path: genderageModelPath,
-          nudenet_model_path: nudenetModelPath,
-          nudenet_conf_threshold: nudenetConfThreshold,
-          nsfw_model_path: nsfwModelPath,
-          nsfw_class_names_path: nsfwClassNamesPath,
-        },
-      });
+      await persistModelConfig({ ...currentModelConfig(get()), face_det_model_path: detModelPath, face_genderage_model_path: genderageModelPath });
       set({ faceDetModelPath: detModelPath, faceGenderageModelPath: genderageModelPath });
     } catch (e) {
       set({ error: String(e) });
@@ -518,22 +541,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveNudenetConfig: async (modelPath, confThreshold) => {
-    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath, nsfwModelPath, nsfwClassNamesPath } = get();
     try {
-      await invoke('save_model_config', {
-        config: {
-          face_script_path: faceScriptPath,
-          face_model_dir: faceModelDir,
-          object_model_path: objectModelPath,
-          object_class_names_path: objectClassNamesPath,
-          face_det_model_path: faceDetModelPath,
-          face_genderage_model_path: faceGenderageModelPath,
-          nudenet_model_path: modelPath,
-          nudenet_conf_threshold: confThreshold,
-          nsfw_model_path: nsfwModelPath,
-          nsfw_class_names_path: nsfwClassNamesPath,
-        },
-      });
+      await persistModelConfig({ ...currentModelConfig(get()), nudenet_model_path: modelPath, nudenet_conf_threshold: confThreshold });
       set({ nudenetModelPath: modelPath, nudenetConfThreshold: confThreshold });
     } catch (e) {
       set({ error: String(e) });
@@ -541,22 +550,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   saveNsfwConfig: async (modelPath, classNamesPath) => {
-    const { faceScriptPath, faceModelDir, objectModelPath, objectClassNamesPath, faceDetModelPath, faceGenderageModelPath, nudenetModelPath, nudenetConfThreshold } = get();
     try {
-      await invoke('save_model_config', {
-        config: {
-          face_script_path: faceScriptPath,
-          face_model_dir: faceModelDir,
-          object_model_path: objectModelPath,
-          object_class_names_path: objectClassNamesPath,
-          face_det_model_path: faceDetModelPath,
-          face_genderage_model_path: faceGenderageModelPath,
-          nudenet_model_path: nudenetModelPath,
-          nudenet_conf_threshold: nudenetConfThreshold,
-          nsfw_model_path: modelPath,
-          nsfw_class_names_path: classNamesPath,
-        },
-      });
+      await persistModelConfig({ ...currentModelConfig(get()), nsfw_model_path: modelPath, nsfw_class_names_path: classNamesPath });
       set({ nsfwModelPath: modelPath, nsfwClassNamesPath: classNamesPath });
     } catch (e) {
       set({ error: String(e) });
