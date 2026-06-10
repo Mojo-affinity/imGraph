@@ -380,17 +380,20 @@ function FaceModelSettings() {
     setOpen(false);
   };
 
-  const useOnnx     = detPath.trim() !== '';
+  const useOnnx      = detPath.trim() !== '';
   const useGenderage = gaPath.trim() !== '';
+  const standaloneGa = !useOnnx && useGenderage;
 
   return (
     <div className="face-model-settings" ref={panelRef}>
       <button
-        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}${useOnnx ? ' toolbar__gear-btn--onnx' : ''}`}
+        className={`toolbar__gear-btn${isOpen ? ' toolbar__gear-btn--active' : ''}${(useOnnx || standaloneGa) ? ' toolbar__gear-btn--onnx' : ''}`}
         onClick={() => setOpen(o => !o)}
-        title={useOnnx
-          ? `顔検出設定 (ONNX${useGenderage ? ' + 年齢推定' : '・顔検出のみ'})`
-          : '顔検出設定 (Python モード)'}
+        title={standaloneGa
+          ? '顔検出設定 (age-gender 単体モード)'
+          : useOnnx
+            ? `顔検出設定 (ONNX${useGenderage ? ' + 年齢推定' : '・顔検出のみ'})`
+            : '顔検出設定 (Python モード)'}
       >
         <GearIcon />
       </button>
@@ -406,6 +409,9 @@ function FaceModelSettings() {
               <span className="face-model-panel__active-tag">
                 {useGenderage ? '顔検出+年齢推定' : '顔検出のみ'}
               </span>
+            )}
+            {standaloneGa && (
+              <span className="face-model-panel__active-tag">age-gender 単体</span>
             )}
           </p>
 
@@ -428,10 +434,11 @@ function FaceModelSettings() {
 
           <label className="face-model-panel__label">
             年齢・性別モデル
-            <span className="face-model-panel__hint">（任意 — 空欄で顔検出のみ）</span>
+            <span className="face-model-panel__hint">（任意 — 単体利用も可）</span>
           </label>
           <p className="face-model-panel__model-note">
-            対応: genderage.onnx / age-gender-prediction-ONNX / MobileNetV2 age regression
+            対応: genderage.onnx / age-gender-prediction-ONNX / MobileNetV2 age regression<br />
+            ※ 顔検出モデル未設定 + 年齢モデル設定 → 画像全体に直接適用（単体モード）
           </p>
           <div className="face-model-panel__row">
             <input

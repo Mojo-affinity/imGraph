@@ -140,6 +140,7 @@ fn warp_face_umeyama(img: &RgbImage, params: &[f64; 4], size: usize) -> Array4<f
 
 // ─── 2次モデル自動判別 ────────────────────────────────────────────
 
+#[derive(Clone, Copy)]
 enum SecondaryModelKind {
     /// InsightFace genderage: NCHW [1,3,H,W] [0,255], 出力 [1,3]=[f,m,age/100]
     Genderage { size: usize },
@@ -326,6 +327,108 @@ struct Det {
     cx: f32, cy: f32, w: f32, h: f32,
     score: f32,
     kps: Option<[[f32; 2]; 5]>,
+}
+
+// ─── 年齢・性別モデル単体実行（顔検出モデル不要）──────────────────
+//
+// 画像全体（中央寄せ正方形クロップ → リサイズ）をそのままモデルに渡す。
+// 顔がアップで写っている画像や、既にトリミング済みの顔画像向け。
+
+pub fn run_age_gender_whole_image(
+    image_path: &str,
+    model_path: &str,
+) -> Result<Vec<BoundingBox>, String> {
+    let img = image::open(image_path)
+        .map_err(|e| format!("画像読み込みエラー: {}", e))?;
+    let orig_w = img.width() as f32;
+    let orig_h = img.height() as f32;
+    let img_rgb = img.to_rgb8();
+
+    let mut ga_guard = get_session(&GA_SESS, model_path)?;
+
+    // モデル種別・入力サイズを不変借用ブロック内で取得
+    let (kind, size) = {
+        let sess = ga_guard.as_ref().unwrap();
+        let k = detect_secondary_kind(&sess.session);
+        let s = match k {
+            SecondaryModelKind::Genderage { size }
+            | SecondaryModelKind::AgeRegression { size }
+            | SecondaryModelKind::AgeGenderPrediction { size } => size,
+        };
+        (k, s)
+    };
+
+    // 画像全体を各モデル向けに前処理（正方形センタークロップ → リサイズ）
+    let face_input: Array4<f32> = match kind {
+        SecondaryModelKind::AgeRegression { .. } =>
+            crop_face_nhwc(&img_rgb, 0.0, 0.0, orig_w, orig_h, size),
+        SecondaryModelKind::Genderage { .. } =>
+            crop_face_simple(&img_rgb, 0.0, 0.0, orig_w, orig_h, size),
+        SecondaryModelKind::AgeGenderPrediction { .. } =>
+            crop_face_nchw_imagenet(&img_rgb, 0.0, 0.0, orig_w, orig_h, size),
+    };
+
+    let ga_sess = ga_guard.as_mut().unwrap();
+    let ga_tensor = Tensor::<f32>::from_array(face_input)
+        .map_err(|e| format!("テンソル構築: {}", e))?;
+    let ga_out = ga_sess.session
+        .run(ort::inputs![ga_tensor])
+        .map_err(|e| format!("age-gender 推論: {}", e))?;
+
+    let (label, age) = match kind {
+        SecondaryModelKind::Genderage { .. } => {
+            let arr = ga_out[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("genderage 出力: {}", e))?;
+            if arr.shape().get(1).copied().unwrap_or(0) >= 3 {
+                let (f, m) = (arr[[0, 0]], arr[[0, 1]]);
+                let age = (arr[[0, 2]] * 100.0).round() as u32;
+                let g = if m > f { "male" } else { "female" };
+                (g.to_string(), Some(age))
+            } else {
+                ("face".to_string(), None)
+            }
+        }
+        SecondaryModelKind::AgeRegression { .. } => {
+            let arr = ga_out[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("年齢回帰出力: {}", e))?;
+            let age = arr.first().copied().unwrap_or(0.0).round().max(0.0) as u32;
+            ("face".to_string(), Some(age))
+        }
+        SecondaryModelKind::AgeGenderPrediction { .. } => {
+            let flat0: Vec<f32> = ga_out[0]
+                .try_extract_array::<f32>()
+                .map_err(|e| format!("出力0取得: {}", e))?
+                .iter().cloned().collect();
+            let (age_flat, gender_flat) = if ga_out.len() >= 2 {
+                let flat1: Vec<f32> = ga_out[1]
+                    .try_extract_array::<f32>()
+                    .map_err(|e| format!("出力1取得: {}", e))?
+                    .iter().cloned().collect();
+                if flat0.len() >= flat1.len() { (flat0, flat1) } else { (flat1, flat0) }
+            } else {
+                (flat0, vec![])
+            };
+            let age = softmax_weighted_age(&age_flat);
+            let g = if gender_flat.len() >= 2 && gender_flat[1] > gender_flat[0] {
+                "male"
+            } else if gender_flat.len() >= 2 {
+                "female"
+            } else {
+                "face"
+            };
+            (g.to_string(), Some(age))
+        }
+    };
+
+    Ok(vec![BoundingBox {
+        id: next_id(),
+        x: 0.0, y: 0.0, width: 1.0, height: 1.0,
+        label,
+        confidence: 1.0,
+        age,
+    }])
 }
 
 // ─── 公開エントリポイント ────────────────────────────────────────

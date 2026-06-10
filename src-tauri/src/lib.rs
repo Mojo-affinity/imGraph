@@ -350,6 +350,29 @@ async fn detect_faces_and_age(
                 Err(e)
             }
         }
+    } else if !face_genderage_model_path.is_empty() {
+        // 年齢・性別モデル単体モード（顔検出モデル不要）
+        emit_log(&app, "info", format!("[age-gender/単体] 開始: {}", fname));
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            face_inference::run_age_gender_whole_image(&image_path, &face_genderage_model_path)
+        })
+        .await
+        .map_err(|e| format!("タスク実行エラー: {}", e))?;
+
+        match result {
+            Ok(boxes) => {
+                let summary: Vec<String> = boxes.iter().map(|b| {
+                    let age = b.age.map(|a| format!(" age={}", a)).unwrap_or_default();
+                    format!("{}{}", b.label, age)
+                }).collect();
+                emit_log(&app, "info", format!("[age-gender/単体] 完了: [{}]", summary.join(", ")));
+                Ok(boxes)
+            }
+            Err(e) => {
+                emit_log(&app, "error", format!("[age-gender/単体] エラー: {}", e));
+                Err(e)
+            }
+        }
     } else {
         emit_log(&app, "info", format!("[顔検出/Python] 開始: {}", fname));
         match inference::run_face_detection(&image_path, &script_path, &model_dir).await {
