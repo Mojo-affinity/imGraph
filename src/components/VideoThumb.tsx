@@ -1,3 +1,4 @@
+import { useRef, useEffect, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface VideoThumbProps {
@@ -6,10 +7,31 @@ interface VideoThumbProps {
 }
 
 export function VideoThumb({ path, className }: VideoThumbProps) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [src, setSrc] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // ビューポートから 300px 以内に入ったときだけ src をセット
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setSrc(convertFileSrc(path));
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [path]);
+
   return (
     <video
-      src={convertFileSrc(path)}
-      preload="metadata"
+      ref={ref}
+      src={src}
+      preload={src ? 'metadata' : 'none'}
       muted
       playsInline
       className={className}
