@@ -7,6 +7,8 @@ import { Toolbar } from './components/Toolbar';
 import { FileList } from './components/FileList';
 import { MediaViewer } from './components/MediaViewer';
 import { MetadataPanel } from './components/MetadataPanel';
+import { ViewModeGrid } from './components/ViewModeGrid';
+import { ViewModeLarge } from './components/ViewModeLarge';
 import LogWindow from './components/LogWindow';
 import './App.css';
 
@@ -16,6 +18,8 @@ function App() {
 
   const appendAppLog   = useStore(s => s.appendAppLog);
   const showLogWindow  = useStore(s => s.showLogWindow);
+  const viewMode       = useStore(s => s.viewMode);
+  const viewSubMode    = useStore(s => s.viewSubMode);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
@@ -38,6 +42,13 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // ビューモード中は ViewModeGrid / ViewModeLarge がキーを処理するため、
+      // ? のみ受け付けて残りは流す
+      if (viewMode === 'view') {
+        if (e.key === '?') setShowShortcuts(v => !v);
+        return;
+      }
+
       const inInput = e.target instanceof HTMLInputElement
         || e.target instanceof HTMLTextAreaElement
         || (e.target as HTMLElement).isContentEditable;
@@ -133,7 +144,7 @@ function App() {
     store.saveAnnotation, store.updateMetadata,
     store.runInference, store.runNsfwClassification,
     store.isInferring, store.isScanning, store.isClassifyingNsfw,
-    showShortcuts,
+    showShortcuts, viewMode,
   ]);
 
   const handleDetectObjects = () => {
@@ -186,21 +197,27 @@ function App() {
         <div className="error-banner">{store.error}</div>
       )}
       <div className="app__content">
-        <FileList
-          files={store.files}
-          selectedIndex={store.selectedIndex}
-          metadata={store.metadata}
-          onSelect={store.selectFile}
-        />
-        <MediaViewer file={store.selectedFile} />
-        <MetadataPanel
-          fileName={store.selectedFile?.name ?? null}
-          metadata={store.selectedMetadata}
-          onUpdate={(update) =>
-            store.selectedFile &&
-            store.updateMetadata(store.selectedFile.path, update)
-          }
-        />
+        {viewMode === 'view' ? (
+          viewSubMode === 'grid' ? <ViewModeGrid /> : <ViewModeLarge />
+        ) : (
+          <>
+            <FileList
+              files={store.files}
+              selectedIndex={store.selectedIndex}
+              metadata={store.metadata}
+              onSelect={store.selectFile}
+            />
+            <MediaViewer file={store.selectedFile} />
+            <MetadataPanel
+              fileName={store.selectedFile?.name ?? null}
+              metadata={store.selectedMetadata}
+              onUpdate={(update) =>
+                store.selectedFile &&
+                store.updateMetadata(store.selectedFile.path, update)
+              }
+            />
+          </>
+        )}
       </div>
       {showLogWindow && <LogWindow />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}

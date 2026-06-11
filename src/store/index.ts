@@ -108,6 +108,11 @@ interface StoreState {
   // ── UI モード ─────────────────────────────────────────────
   annotationMode: boolean;
 
+  // ── 画像ビューモード ──────────────────────────────────────
+  viewMode: 'annotate' | 'view';
+  viewSubMode: 'grid' | 'large';
+  viewImageIndex: number;
+
   // ── ログ ──────────────────────────────────────────────────
   appLogs: LogEntry[];
   showLogWindow: boolean;
@@ -159,6 +164,10 @@ interface StoreState {
 
   // ── UI モード ─────────────────────────────────────────────
   toggleAnnotationMode: () => void;
+  setViewMode: (mode: 'annotate' | 'view') => void;
+  setViewSubMode: (sub: 'grid' | 'large') => void;
+  setViewImageIndex: (index: number) => void;
+  openInLargeView: (index: number) => void;
 
   // ── ログ ──────────────────────────────────────────────────
   appendAppLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void;
@@ -203,6 +212,9 @@ export const useStore = create<StoreState>()((set, get) => ({
   bundledDetectFacesPy: '',
   bundledTrainPy: '',
   annotationMode: true,
+  viewMode: 'annotate',
+  viewSubMode: 'grid',
+  viewImageIndex: 0,
   appLogs: [],
   showLogWindow: false,
   isBatchNudenet: false,
@@ -225,6 +237,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         error: null,
         boundingBoxes: [],
         trainingLogs: [],
+        viewImageIndex: 0,
       });
 
       const unlistenBatch = await listen<MediaFile[]>('scan-batch', (event) => {
@@ -508,6 +521,10 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   toggleAnnotationMode: () => set(s => ({ annotationMode: !s.annotationMode })),
+  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewSubMode: (sub) => set({ viewSubMode: sub }),
+  setViewImageIndex: (index) => set({ viewImageIndex: index }),
+  openInLargeView: (index) => set({ viewSubMode: 'large', viewImageIndex: index }),
 
   appendAppLog: ({ level, message }) =>
     set(s => ({

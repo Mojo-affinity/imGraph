@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { VideoThumb } from './VideoThumb';
 import type { MediaFile, MetadataMap } from '../types';
 
 // ─── Data helpers ─────────────────────────────────────────────
@@ -141,6 +142,8 @@ export function FileList({ files, selectedIndex, metadata, onSelect }: FileListP
                           loading="lazy"
                           draggable={false}
                         />
+                      ) : file.media_type === 'video' ? (
+                        <VideoThumb path={file.path} className="file-item__thumb-video" />
                       ) : (
                         <VideoIcon />
                       )}

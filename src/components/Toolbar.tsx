@@ -38,6 +38,7 @@ export function Toolbar({
   onBatchNudenet,
 }: ToolbarProps) {
   const [saved, setSaved] = useState(false);
+  const viewMode = useStore(s => s.viewMode);
 
   const handleSave = async () => {
     await onSaveAnnotation();
@@ -45,9 +46,10 @@ export function Toolbar({
     setTimeout(() => setSaved(false), 1800);
   };
 
-  const isImage = selectedFile?.media_type === 'image';
+  const isImage  = selectedFile?.media_type === 'image';
   const canInfer = isImage && !isScanning && !isInferring;
   const canSave  = isImage && !isScanning && !isSaving;
+  const isAnnotate = viewMode === 'annotate';
 
   return (
     <div className="toolbar">
@@ -78,19 +80,22 @@ export function Toolbar({
 
       <div className="toolbar__spacer" />
 
-      {/* 一括部位推定→保存 */}
-      {currentDir && (
+      {/* 一括部位推定→保存（アノテーションモード時のみ） */}
+      {isAnnotate && currentDir && (
         <BatchNudenetButton onBatchNudenet={onBatchNudenet} isScanning={isScanning} />
       )}
 
       {/* ログウィンドウトグル */}
       <LogToggleButton />
 
-      {/* アノテーションモード切替 */}
-      {isImage && <AnnotationModeToggle />}
+      {/* ビューモード切替 */}
+      {currentDir && <ViewModeToggle />}
 
-      {/* 推論ボタングループ */}
-      {isImage && (
+      {/* アノテーションモード切替（アノテーションモード・画像選択時のみ） */}
+      {isAnnotate && isImage && <AnnotationModeToggle />}
+
+      {/* 推論ボタングループ（アノテーションモード・画像選択時のみ） */}
+      {isAnnotate && isImage && (
         <div className="toolbar__inference-group">
           <div className="toolbar__face-group">
             <button
@@ -143,8 +148,8 @@ export function Toolbar({
         </div>
       )}
 
-      {/* 学習データとして保存 */}
-      {isImage && (
+      {/* 学習データとして保存（アノテーションモード・画像選択時のみ） */}
+      {isAnnotate && isImage && (
         <button
           className={`toolbar__save-btn${saved ? ' toolbar__save-btn--saved' : ''}`}
           onClick={handleSave}
@@ -161,6 +166,25 @@ export function Toolbar({
         </button>
       )}
     </div>
+  );
+}
+
+// ─── ビューモード切替ボタン ───────────────────────────────────
+
+function ViewModeToggle() {
+  const viewMode   = useStore(s => s.viewMode);
+  const setViewMode = useStore(s => s.setViewMode);
+  const isView = viewMode === 'view';
+
+  return (
+    <button
+      className={`toolbar__view-btn${isView ? ' toolbar__view-btn--active' : ''}`}
+      onClick={() => setViewMode(isView ? 'annotate' : 'view')}
+      title={isView ? 'アノテーションモードに戻る' : '画像ビューモード'}
+    >
+      <GridIcon />
+      ビュー
+    </button>
   );
 }
 
@@ -890,6 +914,17 @@ function BatchIcon() {
       <polygon points="12 2 2 7 12 12 22 7 12 2" />
       <polyline points="2 17 12 22 22 17" />
       <polyline points="2 12 12 17 22 12" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
   );
 }
