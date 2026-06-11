@@ -454,6 +454,28 @@ fn find_insightface_genderage() -> Option<String> {
     face_inference::find_insightface_genderage()
 }
 
+// ─── Python ランナー ──────────────────────────────────────────
+//
+// uv が PATH 上にあれば `uv run <script>` を使い、隔離環境で実行する。
+// ない場合は `python3`（Windows では `python`）にフォールバックする。
+
+pub(crate) fn resolve_python_cmd(script_path: &str) -> (String, Vec<String>) {
+    let uv_available = std::process::Command::new("uv")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if uv_available {
+        ("uv".to_string(), vec!["run".to_string(), script_path.to_string()])
+    } else {
+        let python = if cfg!(target_os = "windows") { "python" } else { "python3" };
+        (python.to_string(), vec![script_path.to_string()])
+    }
+}
+
 // ─── アプリ起動 ───────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -1,9 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "ultralytics>=8.0",
+# ]
+# ///
 """
 imGraph 学習スクリプト — YOLOv8 ファインチューニング
 
 imGraph の「学習を開始」ボタンから以下の形式で呼び出される:
-    python3 train.py --data dataset.yaml [オプション]
+    uv run train.py --data dataset.yaml [オプション]
 
 必須引数:
     --data      dataset.yaml のパス（imGraph のデータセット生成で作成）
@@ -22,8 +28,8 @@ imGraph の「学習を開始」ボタンから以下の形式で呼び出され
 学習完了後に best.pt を自動的に ONNX 形式へエクスポートする。
 エクスポートされた best.onnx を imGraph の「物体検出設定 ⚙」で指定すれば推論に使用可能。
 
-依存パッケージ:
-    pip install ultralytics
+依存パッケージ（uv が自動管理）:
+    ultralytics>=8.0
 """
 
 import argparse
@@ -70,7 +76,8 @@ def main() -> None:
         from ultralytics import YOLO
     except ImportError:
         print("[ERR] ultralytics がインストールされていません。", flush=True)
-        print("[ERR]   pip install ultralytics", flush=True)
+        print("[ERR]   uv をインストールして uv run train.py で実行するか、", flush=True)
+        print("[ERR]   pip install ultralytics を実行してください。", flush=True)
         sys.exit(1)
 
     # ベースモデルの読み込み

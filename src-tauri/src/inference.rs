@@ -324,9 +324,9 @@ pub async fn run_face_detection(
     let model_dir = model_dir.to_string();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let python = if cfg!(target_os = "windows") { "python" } else { "python3" };
-        let mut cmd = std::process::Command::new(python);
-        cmd.arg(&script_path).arg("--image").arg(&image_path);
+        let (runner, base_args) = crate::resolve_python_cmd(&script_path);
+        let mut cmd = std::process::Command::new(&runner);
+        cmd.args(&base_args).arg("--image").arg(&image_path);
         if !model_dir.is_empty() {
             cmd.arg("--model-dir").arg(&model_dir);
         }

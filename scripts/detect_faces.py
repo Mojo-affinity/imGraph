@@ -1,14 +1,22 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "insightface",
+#   "onnxruntime",
+#   "opencv-python",
+# ]
+# ///
 """
 顔検出 + 年齢推定スクリプト（InsightFace 使用）
 stdout に JSON 配列のみを出力する。ライブラリの余分な出力は stderr へ。
 
-必要パッケージ:
-    pip install insightface onnxruntime opencv-python
+依存パッケージ（uv が自動管理）:
+    insightface, onnxruntime, opencv-python
 
 使用例:
-    python3 detect_faces.py --image /path/to/image.jpg
-    python3 detect_faces.py --image /path/to/image.jpg --model-dir /custom/root
+    uv run detect_faces.py --image /path/to/image.jpg
+    uv run detect_faces.py --image /path/to/image.jpg --model-dir /custom/root
 """
 import sys
 import os
@@ -47,7 +55,8 @@ def main() -> None:
         from insightface.app import FaceAnalysis
     except ImportError as e:
         print(f"ImportError: {e}\n"
-              "  pip install insightface onnxruntime opencv-python",
+              "  uv をインストールして uv run detect_faces.py で実行するか、\n"
+              "  pip install insightface onnxruntime opencv-python を実行してください。",
               file=sys.stderr)
         sys.exit(1)
 
