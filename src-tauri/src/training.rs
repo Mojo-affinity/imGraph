@@ -26,10 +26,12 @@ pub fn start(
         return Err("すでに学習が実行中です".to_string());
     }
 
-    app.emit("training-log", "▶ 学習プロセスを起動中…").ok();
+    let (cmd, base_args) = crate::resolve_python_cmd(&script_path);
+    let runner_label = if cmd == "uv" { "uv run".to_string() } else { cmd.clone() };
+    app.emit("training-log", format!("▶ 学習プロセスを起動中… ({})", runner_label)).ok();
 
-    let mut child = Command::new("python3")
-        .arg(&script_path)
+    let mut child = Command::new(&cmd)
+        .args(&base_args)
         .arg("--data")
         .arg(&dataset_path)
         .args(&extra_args)
