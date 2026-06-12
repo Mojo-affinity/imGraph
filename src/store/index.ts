@@ -112,6 +112,8 @@ interface StoreState {
   viewMode: 'annotate' | 'view';
   viewSubMode: 'grid' | 'large';
   viewImageIndex: number;
+  viewTagFilter: string[];
+  viewTagFilterMode: 'or' | 'and';
 
   // ── ログ ──────────────────────────────────────────────────
   appLogs: LogEntry[];
@@ -168,6 +170,8 @@ interface StoreState {
   setViewSubMode: (sub: 'grid' | 'large') => void;
   setViewImageIndex: (index: number) => void;
   openInLargeView: (index: number) => void;
+  setViewTagFilter: (tags: string[]) => void;
+  setViewTagFilterMode: (mode: 'or' | 'and') => void;
 
   // ── ログ ──────────────────────────────────────────────────
   appendAppLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void;
@@ -215,6 +219,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   viewMode: 'annotate',
   viewSubMode: 'grid',
   viewImageIndex: 0,
+  viewTagFilter: [],
+  viewTagFilterMode: 'or',
   appLogs: [],
   showLogWindow: false,
   isBatchNudenet: false,
@@ -238,6 +244,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         boundingBoxes: [],
         trainingLogs: [],
         viewImageIndex: 0,
+        viewTagFilter: [],
       });
 
       const unlistenBatch = await listen<MediaFile[]>('scan-batch', (event) => {
@@ -525,6 +532,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   setViewSubMode: (sub) => set({ viewSubMode: sub }),
   setViewImageIndex: (index) => set({ viewImageIndex: index }),
   openInLargeView: (index) => set({ viewSubMode: 'large', viewImageIndex: index }),
+  setViewTagFilter: (tags) => set({ viewTagFilter: tags, viewImageIndex: 0 }),
+  setViewTagFilterMode: (mode) => set({ viewTagFilterMode: mode }),
 
   appendAppLog: ({ level, message }) =>
     set(s => ({

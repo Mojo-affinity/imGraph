@@ -1,14 +1,14 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { useStore } from '../store';
+import { useViewFiles } from '../hooks/useViewFiles';
 
 export function ViewModeLarge() {
-  const files             = useStore(s => s.files);
   const viewImageIndex    = useStore(s => s.viewImageIndex);
   const setViewImageIndex = useStore(s => s.setViewImageIndex);
   const setViewSubMode    = useStore(s => s.setViewSubMode);
 
-  const imageFiles = files.filter(f => f.media_type === 'image' || f.media_type === 'video');
+  const imageFiles = useViewFiles();
   const current    = imageFiles[viewImageIndex];
   const total      = imageFiles.length;
   const videoRef   = useRef<HTMLVideoElement>(null);
