@@ -13,6 +13,11 @@ export function ViewModeLarge() {
   const total      = imageFiles.length;
   const videoRef   = useRef<HTMLVideoElement>(null);
 
+  const viewImageIndexRef = useRef(viewImageIndex);
+  const totalRef          = useRef(total);
+  viewImageIndexRef.current = viewImageIndex;
+  totalRef.current          = total;
+
   const goBack = useCallback(() => setViewSubMode('grid'), [setViewSubMode]);
   const goPrev = useCallback(() => {
     if (viewImageIndex > 0) setViewImageIndex(viewImageIndex - 1);
@@ -22,17 +27,25 @@ export function ViewModeLarge() {
   }, [viewImageIndex, total, setViewImageIndex]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const idx = viewImageIndexRef.current;
+    const len = totalRef.current;
     switch (e.key) {
       case 'ArrowLeft':
       case 'ArrowUp':
-        e.preventDefault(); goPrev(); break;
+        e.preventDefault();
+        if (idx > 0) setViewImageIndex(idx - 1);
+        break;
       case 'ArrowRight':
       case 'ArrowDown':
-        e.preventDefault(); goNext(); break;
+        e.preventDefault();
+        if (idx < len - 1) setViewImageIndex(idx + 1);
+        break;
       case 'Escape':
-        e.preventDefault(); goBack(); break;
+        e.preventDefault();
+        setViewSubMode('grid');
+        break;
     }
-  }, [goPrev, goNext, goBack]);
+  }, [setViewImageIndex, setViewSubMode]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);

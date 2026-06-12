@@ -17,6 +17,14 @@ export function ViewModeGrid() {
   const selectedRef    = useRef<HTMLDivElement>(null);
   const [cellSize, setCellSize] = useState(MIN_CELL);
 
+  // ref で最新値を保持することで、キーボードハンドラーを安定させる（re-register なし）
+  const viewImageIndexRef = useRef(viewImageIndex);
+  const viewFilesLengthRef = useRef(viewFiles.length);
+  const cellSizeRef = useRef(cellSize);
+  viewImageIndexRef.current = viewImageIndex;
+  viewFilesLengthRef.current = viewFiles.length;
+  cellSizeRef.current = cellSize;
+
   // コンテナの実幅を監視して正確なセルサイズ(px)を計算
   useEffect(() => {
     const el = containerRef.current;
@@ -39,29 +47,28 @@ export function ViewModeGrid() {
     containerRef.current?.focus();
   }, []);
 
-  const getColCount = useCallback(() => {
-    const w = containerRef.current?.getBoundingClientRect().width ?? 0;
-    return Math.max(1, Math.floor(w / (cellSize + GAP)));
-  }, [cellSize]);
-
+  // ref ベース: 常に最新値を参照するので deps は安定した関数のみ → リスナーは mount/unmount 時だけ
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (viewFiles.length === 0) return;
-    const cols = getColCount();
-    let next = viewImageIndex;
+    const len = viewFilesLengthRef.current;
+    if (len === 0) return;
+    const idx = viewImageIndexRef.current;
+    const w = containerRef.current?.getBoundingClientRect().width ?? 0;
+    const cols = Math.max(1, Math.floor(w / (cellSizeRef.current + GAP)));
+    let next = idx;
 
     switch (e.key) {
-      case 'ArrowRight': e.preventDefault(); next = Math.min(viewImageIndex + 1, viewFiles.length - 1); break;
-      case 'ArrowLeft':  e.preventDefault(); next = Math.max(viewImageIndex - 1, 0); break;
-      case 'ArrowDown':  e.preventDefault(); next = Math.min(viewImageIndex + cols, viewFiles.length - 1); break;
-      case 'ArrowUp':    e.preventDefault(); next = Math.max(viewImageIndex - cols, 0); break;
+      case 'ArrowRight': e.preventDefault(); next = Math.min(idx + 1, len - 1); break;
+      case 'ArrowLeft':  e.preventDefault(); next = Math.max(idx - 1, 0); break;
+      case 'ArrowDown':  e.preventDefault(); next = Math.min(idx + cols, len - 1); break;
+      case 'ArrowUp':    e.preventDefault(); next = Math.max(idx - cols, 0); break;
       case 'Home':       e.preventDefault(); next = 0; break;
-      case 'End':        e.preventDefault(); next = viewFiles.length - 1; break;
-      case 'Enter':      e.preventDefault(); openInLargeView(viewImageIndex); return;
+      case 'End':        e.preventDefault(); next = len - 1; break;
+      case 'Enter':      e.preventDefault(); openInLargeView(idx); return;
       default: return;
     }
 
     setViewImageIndex(next);
-  }, [viewImageIndex, viewFiles.length, getColCount, setViewImageIndex, openInLargeView]);
+  }, [setViewImageIndex, openInLargeView]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);

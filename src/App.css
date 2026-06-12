@@ -1573,9 +1573,7 @@
 .view-grid::-webkit-scrollbar-track { background: transparent; }
 .view-grid::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
 
-/* width/height は ResizeObserver が JS で明示的にセット。explicit size があるので content-visibility: auto が安全に使える */
 .view-grid__cell {
-  content-visibility: auto;
   flex-shrink: 0;
   overflow: hidden;
   cursor: pointer;
