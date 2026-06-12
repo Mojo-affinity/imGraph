@@ -44,6 +44,24 @@ const stopListeners = () => {
   _unlistenFns = [];
 };
 
+// ─── メタデータ保存デバウンス ─────────────────────────────────
+let _metaSaveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleMetadataSave(
+  dirPath: string,
+  metadata: MetadataMap,
+  onError: (e: string) => void
+) {
+  if (_metaSaveTimer) clearTimeout(_metaSaveTimer);
+  _metaSaveTimer = setTimeout(async () => {
+    _metaSaveTimer = null;
+    try {
+      await invoke('save_metadata', { dirPath, metadata });
+    } catch (e) {
+      onError(String(e));
+    }
+  }, 500);
+}
+
 // ─── ファイル選択後にアノテーションをロードするヘルパー ────────
 async function loadAnnotationForFile(
   file: MediaFile | undefined,
@@ -124,7 +142,7 @@ interface StoreState {
   selectFile: (index: number) => void;
   navigatePrev: () => void;
   navigateNext: () => void;
-  updateMetadata: (filePath: string, update: Partial<MediaMetadata>) => Promise<void>;
+  updateMetadata: (filePath: string, update: Partial<MediaMetadata>) => void;
 
   // ── アノテーション操作 ────────────────────────────────────
   saveAnnotation: () => Promise<void>;
@@ -326,7 +344,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     );
   },
 
-  updateMetadata: async (filePath, update) => {
+  updateMetadata: (filePath, update) => {
     const { currentDir, metadata } = get();
     if (!currentDir) return;
     const current = metadata[filePath] ?? { tags: [], rating: 0 };
@@ -335,11 +353,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       [filePath]: { ...current, ...update },
     };
     set({ metadata: updated });
-    try {
-      await invoke('save_metadata', { dirPath: currentDir, metadata: updated });
-    } catch (e) {
-      set({ error: String(e) });
-    }
+    scheduleMetadataSave(currentDir, updated, (e) => set({ error: e }));
   },
 
   // ── アノテーション操作 ────────────────────────────────────
