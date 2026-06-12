@@ -1578,13 +1578,16 @@
   overflow: hidden;
   cursor: pointer;
   background: var(--surface);
-  transition: box-shadow 0.1s;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.1s;
 }
 .view-grid__cell:hover {
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25);
+  outline-color: rgba(255,255,255,0.3);
 }
 .view-grid__cell--selected {
-  box-shadow: inset 0 0 0 3px var(--accent);
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .view-grid__media {
