@@ -1,31 +1,48 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { VideoThumb } from './VideoThumb';
 import { useStore } from '../store';
 import { useViewFiles } from '../hooks/useViewFiles';
+
+const GAP = 3;
+const MIN_CELL = 140;
 
 export function ViewModeGrid() {
   const viewImageIndex    = useStore(s => s.viewImageIndex);
   const setViewImageIndex = useStore(s => s.setViewImageIndex);
   const openInLargeView   = useStore(s => s.openInLargeView);
 
-  const viewFiles   = useViewFiles();
-  const gridRef     = useRef<HTMLDivElement>(null);
-  const selectedRef = useRef<HTMLDivElement>(null);
+  const viewFiles      = useViewFiles();
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const selectedRef    = useRef<HTMLDivElement>(null);
+  const [cellSize, setCellSize] = useState(MIN_CELL);
+
+  // コンテナの実幅を監視して正確なセルサイズ(px)を計算
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      if (w <= 0) return;
+      const cols = Math.max(1, Math.floor(w / MIN_CELL));
+      setCellSize(Math.floor((w - GAP * (cols - 1)) / cols));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [viewImageIndex]);
 
   useEffect(() => {
-    gridRef.current?.focus();
+    containerRef.current?.focus();
   }, []);
 
   const getColCount = useCallback(() => {
-    const el = gridRef.current;
-    if (!el) return 1;
-    return Math.max(1, getComputedStyle(el).gridTemplateColumns.split(' ').length);
-  }, []);
+    const w = containerRef.current?.getBoundingClientRect().width ?? 0;
+    return Math.max(1, Math.floor(w / (cellSize + GAP)));
+  }, [cellSize]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (viewFiles.length === 0) return;
@@ -60,12 +77,13 @@ export function ViewModeGrid() {
           <p>条件に一致するファイルがありません</p>
         </div>
       ) : (
-        <div className="view-grid" ref={gridRef} tabIndex={0}>
+        <div className="view-grid" ref={containerRef} tabIndex={0}>
           {viewFiles.map((file, idx) => (
             <div
               key={file.path}
               ref={idx === viewImageIndex ? selectedRef : undefined}
               className={`view-grid__cell${idx === viewImageIndex ? ' view-grid__cell--selected' : ''}`}
+              style={{ width: cellSize, height: cellSize }}
               onClick={() => setViewImageIndex(idx)}
               onDoubleClick={() => openInLargeView(idx)}
               title={file.name}
@@ -100,7 +118,6 @@ function TagFilterBar({ filteredCount }: { filteredCount: number }) {
   const setViewTagFilter   = useStore(s => s.setViewTagFilter);
   const setViewTagFilterMode = useStore(s => s.setViewTagFilterMode);
 
-  // 全メディアファイルから使われているタグを収集
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
     for (const f of files) {

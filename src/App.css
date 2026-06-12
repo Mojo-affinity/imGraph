@@ -1560,9 +1560,8 @@
 .view-grid {
   flex: 1;
   overflow-y: auto;
-  padding: 3px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 3px;
   align-content: start;
   outline: none;
@@ -1572,18 +1571,13 @@
 .view-grid::-webkit-scrollbar-track { background: transparent; }
 .view-grid::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
 
+/* width/height は ResizeObserver が JS で明示的にセット */
 .view-grid__cell {
-  position: relative;
+  flex-shrink: 0;
   overflow: hidden;
   cursor: pointer;
   background: var(--surface);
   transition: box-shadow 0.1s;
-}
-/* padding-top:100% は親の幅の100%になるため、aspect-ratioに依存せず確実に正方形を作る */
-.view-grid__cell::before {
-  content: '';
-  display: block;
-  padding-top: 100%;
 }
 .view-grid__cell:hover {
   box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25);
@@ -1593,8 +1587,6 @@
 }
 
 .view-grid__media {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
