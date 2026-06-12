@@ -247,11 +247,22 @@ export const useStore = create<StoreState>()((set, get) => ({
         viewTagFilter: [],
       });
 
+      let scanBuffer: MediaFile[] = [];
+      let scanTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushScanBuffer = () => {
+        if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+        const batch = scanBuffer.splice(0);
+        if (batch.length > 0) set((s) => ({ files: [...s.files, ...batch] }));
+      };
+
       const unlistenBatch = await listen<MediaFile[]>('scan-batch', (event) => {
-        set((s) => ({ files: [...s.files, ...event.payload] }));
+        scanBuffer.push(...event.payload);
+        if (scanTimer) clearTimeout(scanTimer);
+        scanTimer = setTimeout(flushScanBuffer, 150);
       });
 
       const unlistenComplete = await listen('scan-complete', async () => {
+        flushScanBuffer();
         stopListeners();
         set((s) => ({
           files: [...s.files].sort((a, b) =>

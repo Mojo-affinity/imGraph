@@ -177,7 +177,7 @@ async fn scan_directory(app: tauri::AppHandle, path: String) -> Result<(), Strin
     }
 
     tauri::async_runtime::spawn(async move {
-        const BATCH_SIZE: usize = 50;
+        const BATCH_SIZE: usize = 200;
         let mut batch: Vec<MediaFile> = Vec::with_capacity(BATCH_SIZE);
 
         for entry in WalkDir::new(&root)

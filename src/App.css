@@ -266,6 +266,8 @@
 }
 
 .file-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 55px;
   display: flex;
   align-items: center;
   gap: 10px;
