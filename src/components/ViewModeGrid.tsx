@@ -12,20 +12,19 @@ export function ViewModeGrid() {
   const setViewImageIndex = useStore(s => s.setViewImageIndex);
   const openInLargeView   = useStore(s => s.openInLargeView);
 
-  const viewFiles      = useViewFiles();
-  const containerRef   = useRef<HTMLDivElement>(null);
-  const selectedRef    = useRef<HTMLDivElement>(null);
+  const viewFiles    = useViewFiles();
+  const containerRef = useRef<HTMLDivElement>(null);
   const [cellSize, setCellSize] = useState(MIN_CELL);
 
-  // ref で最新値を保持することで、キーボードハンドラーを安定させる（re-register なし）
-  const viewImageIndexRef = useRef(viewImageIndex);
+  // refs で最新値を保持 → ハンドラーを安定させる
+  const viewImageIndexRef  = useRef(viewImageIndex);
   const viewFilesLengthRef = useRef(viewFiles.length);
-  const cellSizeRef = useRef(cellSize);
-  viewImageIndexRef.current = viewImageIndex;
+  const cellSizeRef        = useRef(cellSize);
+  viewImageIndexRef.current  = viewImageIndex;
   viewFilesLengthRef.current = viewFiles.length;
-  cellSizeRef.current = cellSize;
+  cellSizeRef.current        = cellSize;
 
-  // コンテナの実幅を監視して正確なセルサイズ(px)を計算
+  // コンテナ幅を監視して正確なセルサイズ(px)を計算
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -39,15 +38,24 @@ export function ViewModeGrid() {
     return () => obs.disconnect();
   }, []);
 
+  // 選択変更を React 再レンダリングなしで直接 DOM に反映
+  // → 全セル再レンダリングを回避し、確実にスクロール
   useEffect(() => {
-    selectedRef.current?.scrollIntoView({ block: 'nearest' });
+    const container = containerRef.current;
+    if (!container) return;
+    const prev = container.querySelector<HTMLElement>('.view-grid__cell--selected');
+    prev?.classList.remove('view-grid__cell--selected');
+    const cell = container.children[viewImageIndex] as HTMLElement | undefined;
+    if (cell) {
+      cell.classList.add('view-grid__cell--selected');
+      cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
   }, [viewImageIndex]);
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
 
-  // ref ベース: 常に最新値を参照するので deps は安定した関数のみ → リスナーは mount/unmount 時だけ
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const len = viewFilesLengthRef.current;
     if (len === 0) return;
@@ -88,8 +96,7 @@ export function ViewModeGrid() {
           {viewFiles.map((file, idx) => (
             <div
               key={file.path}
-              ref={idx === viewImageIndex ? selectedRef : undefined}
-              className={`view-grid__cell${idx === viewImageIndex ? ' view-grid__cell--selected' : ''}`}
+              className="view-grid__cell"
               style={{ width: cellSize, height: cellSize }}
               onClick={() => setViewImageIndex(idx)}
               onDoubleClick={() => openInLargeView(idx)}
