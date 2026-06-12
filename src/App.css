@@ -1461,9 +1461,6 @@
   overflow: hidden;
   cursor: pointer;
   background: var(--surface);
-  /* ビューポート外のセルのレンダリングをスキップしてスクロール性能を改善 */
-  content-visibility: auto;
-  contain-intrinsic-size: 140px 140px;
   transition: box-shadow 0.1s;
 }
 .view-grid__cell:hover {
