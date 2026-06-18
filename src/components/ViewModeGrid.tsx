@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { ThumbImg } from './ThumbImg';
 import { VideoThumb } from './VideoThumb';
 import { useStore } from '../store';
 import { useViewFiles } from '../hooks/useViewFiles';
@@ -105,14 +105,7 @@ export function ViewModeGrid() {
               {file.media_type === 'video' ? (
                 <VideoThumb path={file.path} className="view-grid__media" />
               ) : (
-                <img
-                  src={convertFileSrc(file.path)}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  draggable={false}
-                  className="view-grid__media"
-                />
+                <ThumbImg path={file.path} className="view-grid__media" />
               )}
             </div>
           ))}

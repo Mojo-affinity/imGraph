@@ -5,6 +5,7 @@ mod inference;
 mod nsfw;
 mod training;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -275,6 +276,26 @@ fn generate_dataset(
     dataset::generate(&source_dir, &output_dir, val_ratio)
 }
 
+// ─── サムネイル生成 ───────────────────────────────────────────
+
+#[tauri::command]
+async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let img = image::open(&path).map_err(|e| e.to_string())?;
+        let thumb = img.thumbnail(size, size);
+        let mut buf = Vec::new();
+        thumb
+            .write_to(
+                &mut std::io::Cursor::new(&mut buf),
+                image::ImageFormat::Jpeg,
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(format!("data:image/jpeg;base64,{}", BASE64.encode(&buf)))
+    })
+    .await
+    .map_err(|e| format!("スレッドエラー: {}", e))?
+}
+
 // ─── ログイベント ─────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
@@ -502,6 +523,7 @@ pub fn run() {
             load_model_config,
             generate_dataset,
             get_bundled_scripts,
+            get_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
