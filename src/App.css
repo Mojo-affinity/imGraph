@@ -1299,7 +1299,7 @@
   border-radius: 8px;
   min-width: 340px;
   max-width: min(520px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 32px));
+  max-height: calc(100vh - 48px);
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   overflow: hidden;
 }
@@ -1318,9 +1318,9 @@
 }
 
 .shortcuts-panel__body {
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 108px);
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 6px 0;
 }
 
 .shortcuts-panel__close {
@@ -1342,8 +1342,8 @@
 
 .shortcuts-group + .shortcuts-group {
   border-top: 1px solid var(--border);
-  margin-top: 6px;
-  padding-top: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
 }
 
 .shortcuts-group__title {
@@ -1351,7 +1351,7 @@
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  margin: 4px 14px;
+  margin: 3px 14px;
   text-transform: uppercase;
 }
 
@@ -1360,13 +1360,13 @@
 }
 
 .shortcuts-table__keys {
-  padding: 7px 14px;
+  padding: 5px 14px;
   white-space: nowrap;
   width: 1%;
 }
 
 .shortcuts-table__desc {
-  padding: 7px 14px 7px 8px;
+  padding: 5px 14px 5px 8px;
   font-size: 0.82rem;
   color: var(--text);
 }
@@ -1716,4 +1716,93 @@
   justify-content: center;
   color: var(--text-2);
   font-size: 14px;
+}
+
+@media (max-width: 920px) {
+  :root {
+    --sidebar-w: 220px;
+    --meta-w: 240px;
+  }
+
+  .toolbar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .toolbar__path {
+    max-width: 260px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --toolbar-h: auto;
+  }
+
+  .app {
+    min-width: 0;
+  }
+
+  .toolbar {
+    min-height: 48px;
+    height: auto;
+    padding: 8px;
+    flex-wrap: wrap;
+    align-content: center;
+  }
+
+  .toolbar__info {
+    order: 3;
+    width: 100%;
+  }
+
+  .toolbar__path {
+    max-width: none;
+  }
+
+  .toolbar__spacer {
+    flex-basis: 8px;
+  }
+
+  .app__content {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .file-list {
+    width: 100%;
+    height: min(34vh, 220px);
+    min-height: 132px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .media-viewer {
+    flex: 1 1 260px;
+    min-height: 220px;
+    width: 100%;
+  }
+
+  .metadata-panel {
+    width: 100%;
+    height: min(30vh, 240px);
+    min-height: 140px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .shortcuts-overlay {
+    align-items: stretch;
+    padding: 16px;
+  }
+
+  .shortcuts-panel {
+    min-width: 0;
+    width: 100%;
+    max-height: none;
+  }
+
+  .shortcuts-panel__body {
+    max-height: calc(100vh - 76px);
+  }
 }
