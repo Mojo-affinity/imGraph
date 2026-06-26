@@ -1298,6 +1298,8 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   min-width: 340px;
+  max-width: min(520px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 32px));
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   overflow: hidden;
 }
@@ -1310,15 +1312,21 @@
   border-bottom: 1px solid var(--border);
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.shortcuts-panel__body {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 8px 0;
 }
 
 .shortcuts-panel__close {
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-2);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
@@ -1330,6 +1338,21 @@
 .shortcuts-table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.shortcuts-group + .shortcuts-group {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.shortcuts-group__title {
+  color: var(--text-2);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 4px 14px;
+  text-transform: uppercase;
 }
 
 .shortcuts-table tr:not(:last-child) td {
@@ -1362,7 +1385,7 @@
 
 .shortcuts-sep {
   font-size: 0.72rem;
-  color: var(--text-muted);
+  color: var(--text-2);
 }
 
 /* ── NSFW Section ──────────────────────────────── */
